@@ -1,0 +1,32 @@
+# Swift Package Manager
+.build/
+.swiftpm/
+Package.resolved
+
+# Xcode
+*.xcodeproj/
+DerivedData/
+*.xcuserstate
+xcuserdata/
+
+# macOS
+.DS_Store
+
+# Build artifacts
+dist/
+
+# Working materials — never commit. These hold agent handoffs, drafts,
+# experiment output and personal paths, and must not reach a public mirror.
+notes/
+plans/
+spikes/
+Reference/
+
+# Secrets / auth — 絶対にコミットしない
+*.auth
+auth.json
+.env
+*.p12
+*.pem
+*.key
+*.cer

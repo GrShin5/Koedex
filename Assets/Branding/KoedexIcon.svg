@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="sealGradient" gradientUnits="userSpaceOnUse" x1="200" y1="180" x2="860" y2="880">
+      <stop offset="0" stop-color="#7A6BFF"/>
+      <stop offset="0.5" stop-color="#5B68FA"/>
+      <stop offset="1" stop-color="#3D71F4"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="1024" height="1024" rx="220" fill="#FFFFFF"/>
+  <path fill="url(#sealGradient)" d="M 579.55 163.00 L 780.47 279.00 C 817.77 300.54 848.02 352.93 848.02 396.00 L 848.02 628.00 C 848.02 671.07 817.77 723.46 780.47 745.00 L 579.55 861.00 C 542.25 882.54 481.75 882.54 444.45 861.00 L 243.53 745.00 C 206.23 723.46 189.01 673.59 205.08 633.63 L 230.87 569.52 C 243.64 537.76 243.64 486.24 230.87 454.48 L 205.08 390.37 C 189.01 350.41 206.23 300.54 243.53 279.00 L 444.45 163.00 C 481.75 141.46 542.25 141.46 579.55 163.00 Z"/>
+  <rect x="347" y="476" width="30" height="72" rx="15" fill="#FFFFFF"/>
+  <rect x="427" y="424" width="30" height="176" rx="15" fill="#FFFFFF"/>
+  <rect x="507" y="378" width="30" height="268" rx="15" fill="#FFFFFF"/>
+  <rect x="587" y="424" width="30" height="176" rx="15" fill="#FFFFFF"/>
+  <rect x="667" y="476" width="30" height="72" rx="15" fill="#FFFFFF"/>
+</svg>

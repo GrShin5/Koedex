@@ -1,0 +1,3 @@
+"NSMicrophoneUsageDescription" = "Koedex uses the microphone for voice-input transcription. Audio is processed on this device and is not sent externally.";
+"NSSpeechRecognitionUsageDescription" = "Koedex uses macOS on-device speech recognition to turn speech into text.";
+"NSAppleEventsUsageDescription" = "Koedex controls other apps only to insert text at the cursor.";

@@ -1,0 +1,54 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# .app の組み立ては行いません。scripts/make_app.sh は安定した署名証明書を要求し、
+# その信頼設定は macOS の仕様上 GUI での手動承認が必須で、CI からは完了できないためです。
+# ここで検証するのはコンパイルと回帰テストまでです。
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show toolchain
+        run: swift --version
+
+      - name: Build
+        run: swift build
+
+      - name: Regression tests
+        # 隔離named pasteboardのフィクスチャは、pasteboardサーバーへ接続できない
+        # CI環境では自動的にSKIPされます（能力プローブによる想定内の動作）。
+        # --max-skips はその想定内の件数の上限です。これを超えたら、新しい検証が
+        # 黙ってSKIPされ始めたということなので失敗させます。pasteboard検証が将来CIで
+        # 動くようになった場合（SKIP=0）は通ります。この数字を動かす時はレビューが必要です。
+        run: .build/debug/Koedex --test-regressions --max-skips 13
+
+      - name: Log hygiene
+        # エラーを丸ごと文字列へ補間すると、NSErrorのuserInfo経由で NSFilePath / NSURL /
+        # underlying error が展開され、絶対パスがログやCLI出力へ入ります。ログは不具合報告
+        # として外へ出る前提なので、AppLog.safeDescription(_:) を使ってください。
+        #
+        # 捕まえる形: `\(error)` `\(error.localizedDescription)`、その os.Logger の
+        # privacy 付き（`\(error, privacy: .public)`）、`String(describing: error)`、
+        # および print/AppLog/logger の呼び出し行に現れる localizedDescription（束縛名を問わず）。
+        # コメント行は除外します（この規則自体を説明する文中にパターンが現れるため）。
+        #
+        # **これは境界ではなくタイプミス検出器です。** 見逃す形が実際にあります:
+        #   - `String(format:)` の引数として複数行に分けて渡す形（このリポジトリの主要な
+        #     ログ書式なので、最も起きやすい抜け道）
+        #   - 変数へ組み立ててから、別の行でログへ渡す形
+        #   - `\(e)` のようにログ呼び出しの外で別名束縛する形
+        # 迷ったら AppLog.safeDescription(_:) を使い、このゲートに頼らないこと。
+        run: |
+          if grep -rnE '(\\\(error(\.localizedDescription)?[,)]|String\(describing: error\)|(print|AppLog\.shared\.[a-z]+|logger\.[a-z]+)\(.*localizedDescription)' Sources/ \
+             | grep -vE '^[^:]+:[0-9]+:[[:space:]]*(//|\*)'; then
+            echo "エラーを丸ごと補間しています。AppLog.safeDescription(_:) を使ってください。" >&2
+            exit 1
+          fi
