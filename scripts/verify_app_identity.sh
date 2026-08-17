@@ -91,7 +91,7 @@ verify_app() {
   signed_identifier="$(printf '%s\n' "$signed_metadata" | sed -n 's/^Identifier=//p' | head -n 1)"
   [[ "$signed_identifier" == "$bundle_id" ]] || fail "署名のIdentifierとInfo.plistのbundle IDが一致しません: $app_path"
 
-  if [[ "$signed_metadata" == *"Signature=adhoc" ]] || ! grep -q '^Authority=' <<<"$signed_metadata"; then
+  if [[ "$signed_metadata" == *"Signature=adhoc"* ]] || ! grep -q '^Authority=' <<<"$signed_metadata"; then
     fail "ad-hoc署名または信頼できる署名者のない.appです: $app_path"
   fi
 

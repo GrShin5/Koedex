@@ -14,6 +14,7 @@ enum PromptResourceLoader {
             do {
                 return try String(contentsOf: url, encoding: .utf8)
             } catch {
+                AppLog.shared.warn("[PromptResourceLoader] resource read failed: \(AppLog.safeDescription(error))")
                 lastReadError = error
             }
         }
@@ -74,8 +75,8 @@ enum PromptResourceLoaderError: Error, LocalizedError {
         switch self {
         case .missing(let name):
             return "プロンプトリソースが見つかりません: \(name)"
-        case .unreadable(let name, let underlying):
-            return "プロンプトリソースを読み込めません: \(name) (\(underlying.localizedDescription))"
+        case .unreadable(let name, _):
+            return "プロンプトリソースを読み込めません: \(name)"
         }
     }
 }

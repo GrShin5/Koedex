@@ -84,6 +84,12 @@ enum RegressionTestSuite {
             CustomInstructionOptimizerError.underlying(rawDiagnostics).localizedDescription,
             CodexModelCatalogError.commandFailed.localizedDescription,
             CodexModelCatalogError.invalidJSON.localizedDescription,
+            PromptResourceLoaderError.unreadable(name: "fixture", underlying: rawDiagnostics).localizedDescription,
+            TranscriptionError.assetInstallFailed(rawDiagnostics).localizedDescription,
+            TranscriptionError.analyzerStartFailed(rawDiagnostics).localizedDescription,
+            TranscriptionError.permissionNotGranted.localizedDescription,
+            OnboardingRestartError.launchFailed.localizedDescription,
+            AppLog.safeDescription(rawDiagnostics),
         ]
         expect(
             safeDiagnostics.allSatisfy { message in
@@ -91,7 +97,7 @@ enum RegressionTestSuite {
                     && !message.contains(diagnosticsPath)
                     && !message.contains(diagnosticsURL)
             },
-            "Codex diagnostics never expose stderr, paths, or URLs"
+            "user-facing errors and diagnostic codes never expose stderr, paths, or URLs"
         )
 
         // ログへ載せるエラー識別子。`\(error)`や`localizedDescription`をそのまま流すと

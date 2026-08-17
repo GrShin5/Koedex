@@ -172,20 +172,18 @@ enum TranscriptionError: Error, LocalizedError {
     case assetInstallFailed(Error)
     case analyzerStartFailed(Error)
     case notWarmedUp
-    case permissionNotGranted(String)
+    case permissionNotGranted
     case languageChangeWhileRecording
 
-    /// **この文字列をログへ出さないこと。**
-    /// 内側のエラーの `localizedDescription` を含むため、ログへ流すと `NSError` の userInfo 経由で
-    /// 絶対パスが混入する。ログには `AppLog.safeDescription(_:)` を使う。
-    /// （CIのログ衛生チェックはこの形を検出できない。束縛名が `error` ではないため。）
+    /// 画面へ出す文言は、内側のエラー本文を含めない。
+    /// 診断ログが必要な場合は `AppLog.safeDescription(_:)` だけを使う。
     var errorDescription: String? {
         switch self {
         case .localeNotSupported(let id): return "ロケール \(id) はSpeechTranscriberでサポートされていません"
-        case .assetInstallFailed(let e): return "音声モデルのインストールに失敗しました: \(e.localizedDescription)"
-        case .analyzerStartFailed(let e): return "文字起こしエンジンの開始に失敗しました: \(e.localizedDescription)"
+        case .assetInstallFailed: return "音声モデルのインストールに失敗しました"
+        case .analyzerStartFailed: return "文字起こしエンジンの開始に失敗しました"
         case .notWarmedUp: return "文字起こしエンジンがまだ初期化されていません"
-        case .permissionNotGranted(let detail): return "権限が不足しているためwarmUpできません: \(detail)"
+        case .permissionNotGranted: return "マイクまたは音声認識の権限が許可されていません"
         case .languageChangeWhileRecording: return "録音または文字起こしの処理中は音声認識言語を変更できません"
         }
     }
@@ -389,12 +387,12 @@ final class TranscriptionEngine: ObservableObject {
 
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         guard micStatus == .authorized else {
-            throw TranscriptionError.permissionNotGranted("マイク権限が未許可です(status=\(micStatus.rawValue))")
+            throw TranscriptionError.permissionNotGranted
         }
 
         let speechStatus = await requestSpeechAuthorizationIfNeeded()
         guard speechStatus == .authorized else {
-            throw TranscriptionError.permissionNotGranted("音声認識権限が未許可です(status=\(speechStatus.rawValue))")
+            throw TranscriptionError.permissionNotGranted
         }
 
         isWarmingUp = true
@@ -408,6 +406,7 @@ final class TranscriptionEngine: ObservableObject {
             }
             try Task.checkCancellation()
         } catch {
+            AppLog.shared.warn("[TranscriptionEngine] asset installation failed: \(AppLog.safeDescription(error))")
             throw TranscriptionError.assetInstallFailed(error)
         }
     }

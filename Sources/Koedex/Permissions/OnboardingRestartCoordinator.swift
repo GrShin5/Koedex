@@ -121,7 +121,7 @@ enum OnboardingRestartError: LocalizedError, Equatable {
     case unsupportedMode
     case applicationBundleUnavailable
     case interactiveChecksDidNotStop
-    case launchFailed(String)
+    case launchFailed
 
     var errorDescription: String? {
         switch self {
@@ -131,8 +131,8 @@ enum OnboardingRestartError: LocalizedError, Equatable {
             return "アプリ本体を見つけられなかったため、再起動できませんでした。"
         case .interactiveChecksDidNotStop:
             return "録音やキー確認の停止を確認できなかったため、再起動を中止しました。少し待ってから、もう一度試してください。"
-        case let .launchFailed(message):
-            return "新しいアプリを起動できませんでした。\(message)"
+        case .launchFailed:
+            return "新しいアプリを起動できませんでした。少し待ってから、もう一度試してください。"
         }
     }
 }
@@ -247,8 +247,9 @@ final class OnboardingRestartCoordinator: ObservableObject {
             do {
                 try self.intentStore.save(intent)
             } catch {
+                AppLog.shared.warn("[OnboardingRestartCoordinator] restart intent save failed: \(AppLog.safeDescription(error))")
                 self.isRestarting = false
-                completion(.failure(.launchFailed(error.localizedDescription)))
+                completion(.failure(.launchFailed))
                 return
             }
 
@@ -262,9 +263,12 @@ final class OnboardingRestartCoordinator: ObservableObject {
                     guard let self else { return }
                     self.isRestarting = false
                     guard application != nil, error == nil else {
+                        if let error {
+                            AppLog.shared.warn("[OnboardingRestartCoordinator] application relaunch failed: \(AppLog.safeDescription(error))")
+                        }
                         self.intentStore.clear()
                         restoreOnboardingWindowAfterFailure()
-                        completion(.failure(.launchFailed(error?.localizedDescription ?? "不明なエラー")))
+                        completion(.failure(.launchFailed))
                         return
                     }
                     completion(.success(()))

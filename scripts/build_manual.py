@@ -3,13 +3,15 @@ import base64
 import mimetypes
 import re
 import sys
+import unicodedata
 from html import escape as esc
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parent.parent
 DOCS_DIR = ROOT / "docs" / "manual"
 DIST_DIR = ROOT / "dist" / "manual"
-DEFAULT_VERSION = "0.1.0"
+DEFAULT_VERSION = "0.1.1"
 
 LANGS = [
     {
@@ -43,6 +45,65 @@ INLINE_RE = re.compile(
     r"|\*\*(?P<bold>[^*]+)\*\*"
 )
 
+SAFE_LINK_SCHEMES = frozenset({"http", "https", "mailto"})
+
+
+class ManualBuildError(Exception):
+    """A manual source violates the fail-closed build contract."""
+
+
+def has_control_character(value):
+    return any(
+        unicodedata.category(character) == "Cc" or character in {"\u2028", "\u2029"}
+        for character in value
+    )
+
+
+def safe_link_href(value):
+    """Return a safe link target, or None when it must not become an anchor."""
+    if not value or value != value.strip() or has_control_character(value):
+        return None
+    if value.startswith("#"):
+        return value
+
+    parsed = urlsplit(value)
+    scheme = parsed.scheme.casefold()
+    if scheme in SAFE_LINK_SCHEMES and scheme != "mailto" and parsed.netloc:
+        return value
+    if scheme == "mailto" and parsed.path:
+        return value
+    return None
+
+
+def safe_manual_image_path(src):
+    """Resolve a manual image only when it remains inside docs/manual/images."""
+    if not src or has_control_character(src) or src.startswith("/") or "\\" in src:
+        raise ManualBuildError("unsafe manual image reference")
+
+    relative = PurePosixPath(src)
+    if (
+        relative.is_absolute()
+        or not relative.parts
+        or relative.parts[0] != "images"
+        or any(part in {".", ".."} for part in relative.parts)
+    ):
+        raise ManualBuildError("unsafe manual image reference")
+
+    raw_candidate = DOCS_DIR.joinpath(*relative.parts)
+    component = DOCS_DIR
+    for part in relative.parts:
+        component = component / part
+        if component.is_symlink():
+            raise ManualBuildError("unsafe manual image reference")
+
+    image_root = (DOCS_DIR / "images").resolve()
+    candidate = raw_candidate.resolve()
+    try:
+        candidate.relative_to(image_root)
+    except ValueError as error:
+        raise ManualBuildError("unsafe manual image reference") from error
+    return candidate
+
 
 def slugify(text):
     s = text.lower()
@@ -72,10 +133,11 @@ def render_inline(text):
         if m.group("code") is not None:
             out.append("<code>%s</code>" % esc(m.group("code")))
         elif m.group("linktext") is not None:
-            out.append(
-                '<a href="%s">%s</a>'
-                % (esc(m.group("linkhref")), esc(m.group("linktext")))
-            )
+            href = safe_link_href(m.group("linkhref"))
+            if href is None:
+                out.append(esc(m.group("linktext")))
+            else:
+                out.append('<a href="%s">%s</a>' % (esc(href), esc(m.group("linktext"))))
         elif m.group("bold") is not None:
             out.append("<strong>%s</strong>" % esc(m.group("bold")))
         pos = m.end()
@@ -325,7 +387,7 @@ def render_block(b, ctx):
 
 
 def render_image(alt, src, ctx):
-    path = (DOCS_DIR / src).resolve()
+    path = safe_manual_image_path(src)
     if path.is_file():
         mime = mimetypes.guess_type(str(path))[0] or "application/octet-stream"
         data = base64.b64encode(path.read_bytes()).decode("ascii")
@@ -360,6 +422,26 @@ def check_anchors(html_text):
     hrefs = re.findall(r'href="#([^"]+)"', html_text)
     broken = [h for h in hrefs if h not in ids]
     return broken
+
+
+def validate_image_blocks(blocks):
+    for block in blocks:
+        if block["type"] == "image":
+            safe_manual_image_path(block["src"])
+        elif block["type"] in ("ul", "ol"):
+            for item in block["items"]:
+                validate_image_blocks(item)
+
+
+def validate_all_manual_images():
+    """Reject unsafe image references before either manual can write HTML."""
+    for lang in LANGS:
+        src_path = DOCS_DIR / lang["src"]
+        if not src_path.is_file():
+            continue
+        lines = src_path.read_text(encoding="utf-8").split("\n")
+        body_start = 1 if lines and HEADING_RE.match(lines[0]) else 0
+        validate_image_blocks(parse_blocks(lines, body_start))
 
 
 # ---- css / shell ----
@@ -600,8 +682,15 @@ def convert(lang):
 
 
 def main():
-    for lang in LANGS:
-        convert(lang)
+    try:
+        # Validate both sources before writing either HTML file.  A malformed
+        # image reference must never produce a partial manual set.
+        validate_all_manual_images()
+        for lang in LANGS:
+            convert(lang)
+    except ManualBuildError:
+        print("error: unsafe manual image reference", file=sys.stderr)
+        return 1
     return 0
 
 

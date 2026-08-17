@@ -1193,7 +1193,8 @@ struct OnboardingView: View {
                 }
             } catch {
                 guard microphoneCheckGeneration == generation else { return }
-                microphoneCheckState = .failed(error.localizedDescription)
+                AppLog.shared.warn("[OnboardingView] microphone check failed: \(AppLog.safeDescription(error))")
+                microphoneCheckState = .failed
             }
         }
     }
@@ -1752,7 +1753,7 @@ enum OnboardingMicrophoneCheckState: Equatable {
     case checking
     case voiceDetected
     case confirmed
-    case failed(String)
+    case failed
 
     var showsMeter: Bool {
         self == .checking || self == .voiceDetected

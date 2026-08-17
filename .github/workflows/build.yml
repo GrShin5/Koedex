@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 # .app の組み立ては行いません。scripts/make_app.sh は安定した署名証明書を要求し、
 # その信頼設定は macOS の仕様上 GUI での手動承認が必須で、CI からは完了できないためです。
 # ここで検証するのはコンパイルと回帰テストまでです。
@@ -14,7 +17,9 @@ jobs:
   build:
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Show toolchain
         run: swift --version

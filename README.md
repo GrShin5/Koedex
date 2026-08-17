@@ -1,15 +1,19 @@
 # Koedex
 
+<p align="center">
+  <img src="Assets/Branding/KoedexIcon-1024.png" width="128" alt="Koedex icon">
+</p>
+
+[English](README.md) | [日本語](README.ja.md) | [User guide](docs/manual/en.md) | [日本語ガイド](docs/manual/ja.md)
+
 Koedex is a system-wide voice input app for macOS. Hold down a hotkey (the
 fn key by default) to record, release it to stop: your speech is
 transcribed on-device, cleaned up by AI (filler removal, self-corrections,
 punctuation), and pasted at the cursor position in whatever app is
 frontmost.
 
-日本語版: [README.ja.md](README.ja.md)
-
-> **New here?** — A full [user manual](docs/manual/en.md) walks through
-> installation, first-run setup, and every setting in plain language.
+> **New here?** — The User guide above walks through installation, first-run
+> setup, and every setting in plain language.
 > This README is the developer-facing summary.
 
 ## Not affiliated with OpenAI
@@ -59,6 +63,13 @@ swift build
 # Assemble dist/Koedex.app
 ./scripts/make_app.sh debug
 ```
+
+### Future distribution
+
+Koedex does not currently provide a distributable release. When one is
+prepared, it must be built from a clean clone of this official repository at
+the matching release tag. Do not distribute an `.app` created from another
+working copy.
 
 ### Code-signing certificate (one-time setup)
 

@@ -1,13 +1,16 @@
 # Koedex
 
+<p align="center">
+  <img src="Assets/Branding/KoedexIcon-1024.png" width="128" alt="Koedex アイコン">
+</p>
+
+[English](README.md) | [日本語](README.ja.md) | [User guide](docs/manual/en.md) | [日本語ガイド](docs/manual/ja.md)
+
 Koedexは、Mac全体で使える音声入力アプリです。ホットキー（既定はfnキー）を押して録音を開始し、
 もう一度押して停止すると、あなたの発話が端末内で文字起こしされ、AIによって整形（フィラー除去・
 言い直しの反映・句読点整形）された後、最前面アプリのカーソル位置に貼り付けられます。
 
-English version: [README.md](README.md)
-
-> **はじめて使う方へ** — 導入から設定までを噛み砕いて説明した
-> [取扱説明書](docs/manual/ja.md)を用意しています。
+> **はじめて使う方へ** — 上の日本語ガイドでは、導入から設定までを噛み砕いて説明しています。
 > このREADMEは開発者向けの要約です。
 
 ## OpenAIとは無関係です
@@ -52,6 +55,11 @@ swift build
 # .appバンドルの組み立て（dist/Koedex.appを生成）
 ./scripts/make_app.sh debug
 ```
+
+### 今後の配布について
+
+現在、配布用のリリースは提供していません。配布物を準備する場合は、この公式リポジトリの対応する
+release tagから作ったcleanなcloneを使います。別の作業用コピーから作った`.app`は配布しません。
 
 ### コード署名証明書（初回のみ）
 

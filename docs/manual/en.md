@@ -2182,8 +2182,8 @@ Once it launches, continue with [6. First-time setup](#6-first-time-setup).
 
 | Item | Detail |
 | --- | --- |
-| Release covered | v0.1.0 |
-| App version covered | 0.1.0 |
+| Release covered | v0.1.1 |
+| App version covered | 0.1.1 |
 | Manual language | English |
 
 This manual was written against the source code in the release above. Newer versions may
