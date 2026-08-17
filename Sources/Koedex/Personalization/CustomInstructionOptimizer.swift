@@ -134,7 +134,7 @@ final class CustomInstructionStateStore: ObservableObject {
         decoder.dateDecodingStrategy = .iso8601
         self.decoder = decoder
 
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        StoragePermissions.ensureDirectory(at: root)
         load()
     }
 
@@ -196,9 +196,14 @@ final class CustomInstructionStateStore: ObservableObject {
     private func save() {
         do {
             let root = fileURL.deletingLastPathComponent()
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: root,
+                withIntermediateDirectories: true,
+                attributes: StoragePermissions.directoryAttributes
+            )
             let data = try encoder.encode(state)
             try data.write(to: fileURL, options: .atomic)
+            StoragePermissions.applyFileMode(to: fileURL)
         } catch {
             AppLog.shared.error("[CustomInstructionStateStore] 保存失敗: \(AppLog.safeDescription(error))")
         }

@@ -36,7 +36,7 @@ final class PidFileManager: @unchecked Sendable {
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let dir = OnboardingRuntimeProfile.storageRootURL
             ?? appSupport.appendingPathComponent("Koedex", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        StoragePermissions.ensureDirectory(at: dir)
         self.fileURL = dir.appendingPathComponent("appserver.pid")
     }
 
@@ -158,6 +158,7 @@ final class PidFileManager: @unchecked Sendable {
         }
         guard let data = try? JSONSerialization.data(withJSONObject: ["records": objects]) else { return }
         try? data.write(to: fileURL, options: .atomic)
+        StoragePermissions.applyFileMode(to: fileURL)
     }
 
     private func isSameLiveProcess(pid: Int32, expectedLstart: String) -> Bool {

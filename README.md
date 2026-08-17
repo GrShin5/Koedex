@@ -51,6 +51,21 @@ communication channel. See [NOTICE](NOTICE) for the full notice.
   instructions — is stored locally under
   `~/Library/Application Support/Koedex/` and is never transmitted
   anywhere by Koedex itself.
+- **That folder is created with owner-only permissions.** Directories are
+  `0700` and files Koedex itself writes are `0600`, so on a Mac shared
+  between several accounts, nobody else can read your transcripts. The
+  `0700` directory is what actually keeps other accounts out — the
+  `codex` CLI writes its own scratch files under
+  `AICommandRuntime/` with its own umask. Files left behind by an earlier
+  version are tightened in the background on every launch; that pass is
+  best-effort and deliberately skips symlinks and hard-linked files so it
+  cannot reach outside the folder.
+- **History retention defaults to 180 days on a new install.** Entries
+  older than that are pruned when the app launches, when a new entry is
+  added, and when you change the setting. A retention value you have
+  already saved is read back as-is — the new default only applies where
+  nothing was saved. Retention is configurable per mode in Settings, and
+  "unlimited" is still one of the choices.
 
 ## Install / build from source
 
@@ -133,6 +148,17 @@ until it restarts.
 - Open **Settings…** from the menu bar icon to toggle AI cleanup, manage
   custom instructions, review history, and edit your personal dictionary.
 - The hotkey is configurable in Settings; the default is fn (`0x3F`).
+- **Text is stripped of a fixed set of non-rendering characters as it is
+  inserted.** The set covers zero-width space, word joiners, control
+  characters, bidirectional override and isolate characters, and tag
+  characters; it is a deny-list, not a promise that every invisible
+  character is caught. Newlines, tabs, and every visible character —
+  including bullet glyphs and list numbering — pass through untouched, so
+  lists and paragraphs produced by AI cleanup keep their shape.
+  Characters that join emoji or select a kanji variant are kept as well,
+  because they change what is drawn. This applies at the moment text is
+  inserted; text you copy out of the result window or the history list is
+  passed through as-is.
 
 ### AI command mode
 

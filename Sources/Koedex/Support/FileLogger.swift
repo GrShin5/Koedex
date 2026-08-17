@@ -45,7 +45,9 @@ final class AppLog: @unchecked Sendable {
         let dir = OnboardingRuntimeProfile.storageRootURL
             ?? appSupport.appendingPathComponent("Koedex", isDirectory: true)
         let logsDir = dir.appendingPathComponent("logs", isDirectory: true)
-        try? FileManager.default.createDirectory(at: logsDir, withIntermediateDirectories: true)
+        // ルートを中間ディレクトリとして作らせるとattributesが効かず0755になる。
+        StoragePermissions.ensureDirectory(at: dir)
+        StoragePermissions.ensureDirectory(at: logsDir)
         self.directoryURL = logsDir
         self.fileURL = logsDir.appendingPathComponent("koedex.log")
 
@@ -99,7 +101,11 @@ final class AppLog: @unchecked Sendable {
     private func append(_ line: String) {
         guard let data = line.data(using: .utf8) else { return }
         if !FileManager.default.fileExists(atPath: fileURL.path) {
-            FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+            FileManager.default.createFile(
+                atPath: fileURL.path,
+                contents: nil,
+                attributes: StoragePermissions.fileAttributes
+            )
         }
         guard let handle = try? FileHandle(forWritingTo: fileURL) else { return }
         defer { try? handle.close() }

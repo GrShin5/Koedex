@@ -63,7 +63,7 @@ struct HandsFreeSendSettings: Codable, Equatable {
         sendKey: .plainReturn,
         allowExternalAutoSend: false,
         historyEnabled: true,
-        historyRetentionDays: 0
+        historyRetentionDays: 180
     )
 
     init(

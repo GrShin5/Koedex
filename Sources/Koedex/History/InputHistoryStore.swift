@@ -29,7 +29,10 @@ final class InputHistoryStore: ObservableObject {
         decoder.dateDecodingStrategy = .iso8601
         self.decoder = decoder
 
-        try? FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+        // ルートを中間ディレクトリとして作らせるとattributesが効かず0755になる。
+        // 最後の防衛線はディレクトリ0700なので、ルートから順に明示的に作る。
+        StoragePermissions.ensureDirectory(at: root)
+        StoragePermissions.ensureDirectory(at: directoryURL)
         load()
     }
 
@@ -140,10 +143,15 @@ final class InputHistoryStore: ObservableObject {
 
     private func appendLine(_ entry: InputHistoryEntry) {
         do {
-            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            StoragePermissions.ensureDirectory(at: directoryURL.deletingLastPathComponent())
+            StoragePermissions.ensureDirectory(at: directoryURL)
             let data = try encoder.encode(entry)
             if !FileManager.default.fileExists(atPath: fileURL.path) {
-                FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+                FileManager.default.createFile(
+                    atPath: fileURL.path,
+                    contents: nil,
+                    attributes: StoragePermissions.fileAttributes
+                )
             }
             let handle = try FileHandle(forWritingTo: fileURL)
             defer { try? handle.close() }
@@ -157,7 +165,8 @@ final class InputHistoryStore: ObservableObject {
 
     private func rewriteFile() {
         do {
-            try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true)
+            StoragePermissions.ensureDirectory(at: directoryURL.deletingLastPathComponent())
+            StoragePermissions.ensureDirectory(at: directoryURL)
             let ordered = entries.sorted { $0.createdAt < $1.createdAt }
             var data = Data()
             for entry in ordered {
@@ -165,6 +174,7 @@ final class InputHistoryStore: ObservableObject {
                 data.append(0x0A)
             }
             try data.write(to: fileURL, options: .atomic)
+            StoragePermissions.applyFileMode(to: fileURL)
         } catch {
             AppLog.shared.error("[InputHistoryStore] 履歴書き換え失敗: \(AppLog.safeDescription(error))")
         }

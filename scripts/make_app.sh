@@ -278,9 +278,9 @@ cat > "$CONTENTS_DIR/Info.plist" << PLIST
     <key>CFBundleIdentifier</key>
     <string>$BUNDLE_IDENTIFIER</string>
     <key>CFBundleVersion</key>
-    <string>0.1.1</string>
+    <string>0.1.2</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.1</string>
+    <string>0.1.2</string>
     <key>KoedexBuildGitSHA</key>
     <string>$BUILD_GIT_SHA</string>
     <key>CFBundlePackageType</key>

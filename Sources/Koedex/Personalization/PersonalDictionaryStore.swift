@@ -65,6 +65,7 @@ final class PersonalDictionaryStore: ObservableObject {
         storageRootURL: URL? = nil,
         atomicDataWriter: @escaping (Data, URL) throws -> Void = { data, url in
             try data.write(to: url, options: .atomic)
+            StoragePermissions.applyFileMode(to: url)
         }
     ) {
         let root: URL
@@ -86,7 +87,7 @@ final class PersonalDictionaryStore: ObservableObject {
         decoder.dateDecodingStrategy = .iso8601
         self.decoder = decoder
 
-        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        StoragePermissions.ensureDirectory(at: root)
         load()
     }
 
@@ -182,7 +183,11 @@ final class PersonalDictionaryStore: ObservableObject {
         do {
             candidateData = try encodedFile(entries: candidate)
             let root = fileURL.deletingLastPathComponent()
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: root,
+                withIntermediateDirectories: true,
+                attributes: StoragePermissions.directoryAttributes
+            )
             let backupURL = root.appendingPathComponent("personal_dictionary.pre-import-backup.json")
             if replacedCount > 0 {
                 try atomicDataWriter(try encodedFile(entries: entries), backupURL)
@@ -218,7 +223,11 @@ final class PersonalDictionaryStore: ObservableObject {
     private func save() {
         do {
             let root = fileURL.deletingLastPathComponent()
-            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(
+                at: root,
+                withIntermediateDirectories: true,
+                attributes: StoragePermissions.directoryAttributes
+            )
             try atomicDataWriter(try encodedFile(entries: entries), fileURL)
         } catch {
             AppLog.shared.error("[PersonalDictionaryStore] 保存失敗: \(AppLog.safeDescription(error))")

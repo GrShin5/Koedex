@@ -3006,9 +3006,9 @@ enum RegressionTestSuite {
         expect(
             languageSetupDebugResetSettings == .default
                 && languageSetupDebugResetSettings.historyEnabled
-                && languageSetupDebugResetSettings.historyRetentionDays == 0
+                && languageSetupDebugResetSettings.historyRetentionDays == 180
                 && languageSetupDebugResetSettings.aiCommandSettings.historyEnabled
-                && languageSetupDebugResetSettings.aiCommandSettings.historyRetentionDays == 0
+                && languageSetupDebugResetSettings.aiCommandSettings.historyRetentionDays == 180
                 && languageSetupDebugResetSettings.setupProgress == .newInstall
                 && languageSetupDebugResetSettings.languagePreferences == .newInstall,
             "Language Setup Debug reset restores the isolated new-install defaults"
@@ -5018,6 +5018,8 @@ enum RegressionTestSuite {
         )
         var v22ScopedPasteSource = KoedexSettings.default
         v22ScopedPasteSource.schemaVersion = 22
+        // v22時点の既定は無期限保持だった。移行の意味を新しい既定値に依存させないため明示する。
+        v22ScopedPasteSource.historyRetentionDays = 0
         v22ScopedPasteSource.externalAppCompatibilitySettings = ExternalAppCompatibilitySettings(
             enabled: true,
             autoReplaceAICommandSelection: true,
@@ -5574,8 +5576,8 @@ enum RegressionTestSuite {
                 && freshStore.settings.handsFreeSendSettings.sendKey == .plainReturn
                 && !freshStore.settings.handsFreeSendSettings.allowExternalAutoSend
                 && freshStore.settings.handsFreeSendSettings.historyEnabled
-                && freshStore.settings.handsFreeSendSettings.historyRetentionDays == 0,
-            "new install keeps hands-free send and external auto-send disabled with unlimited separate history ready"
+                && freshStore.settings.handsFreeSendSettings.historyRetentionDays == 180,
+            "new install keeps hands-free send and external auto-send disabled with a 180-day separate history ready"
         )
         expect(
             freshStore.resolveInitialModelDefaults(usingLiveModels: [liveLuna]) == .appliedLuna,
@@ -6287,6 +6289,191 @@ enum RegressionTestSuite {
             writeFailurePreservedMemory = false
         }
         expect(writeFailurePreservedMemory, "dictionary import write failure leaves in-memory entries unchanged")
+
+        expect(
+            KoedexSettings.default.historyRetentionDays == 180,
+            "fresh install history retention defaults to 180 days"
+        )
+        let freshHistoryRetentionData = try! JSONEncoder().encode(KoedexSettings.default)
+        var historyRetentionOmittedObject = try! JSONSerialization.jsonObject(with: freshHistoryRetentionData) as! [String: Any]
+        historyRetentionOmittedObject.removeValue(forKey: "historyRetentionDays")
+        let historyRetentionOmittedData = try! JSONSerialization.data(withJSONObject: historyRetentionOmittedObject)
+        let historyRetentionOmittedDecoded = try? JSONDecoder().decode(KoedexSettings.self, from: historyRetentionOmittedData)
+        expect(
+            historyRetentionOmittedDecoded?.historyRetentionDays == 0,
+            "existing settings missing historyRetentionDays decode to 0, not the new default"
+        )
+        var historyRetentionExplicitSource = KoedexSettings.default
+        historyRetentionExplicitSource.historyRetentionDays = 30
+        let historyRetentionExplicitData = try! JSONEncoder().encode(historyRetentionExplicitSource)
+        let historyRetentionExplicitDecoded = try? JSONDecoder().decode(KoedexSettings.self, from: historyRetentionExplicitData)
+        expect(
+            historyRetentionExplicitDecoded?.historyRetentionDays == 30,
+            "existing settings with an explicit historyRetentionDays value are preserved on decode"
+        )
+        // 履歴は通常・AIコマンド・ハンズフリーの3系統が独立した保持期間を持つ。
+        // 1つでも無期限のままだと「無期限保持をやめる」目的が達成できないため、既定を揃える。
+        expect(
+            KoedexSettings.default.aiCommandSettings.historyRetentionDays == 180
+                && KoedexSettings.default.handsFreeSendSettings.historyRetentionDays == 180,
+            "fresh install AI-command and hands-free history retention also default to 180 days"
+        )
+        let aiCommandRetentionData = try! JSONEncoder().encode(AICommandSettings.default)
+        var aiCommandRetentionOmitted = try! JSONSerialization.jsonObject(with: aiCommandRetentionData) as! [String: Any]
+        aiCommandRetentionOmitted.removeValue(forKey: "historyRetentionDays")
+        let aiCommandRetentionOmittedDecoded = try? JSONDecoder().decode(
+            AICommandSettings.self,
+            from: try! JSONSerialization.data(withJSONObject: aiCommandRetentionOmitted)
+        )
+        let handsFreeRetentionData = try! JSONEncoder().encode(HandsFreeSendSettings.default)
+        var handsFreeRetentionOmitted = try! JSONSerialization.jsonObject(with: handsFreeRetentionData) as! [String: Any]
+        handsFreeRetentionOmitted.removeValue(forKey: "historyRetentionDays")
+        let handsFreeRetentionOmittedDecoded = try? JSONDecoder().decode(
+            HandsFreeSendSettings.self,
+            from: try! JSONSerialization.data(withJSONObject: handsFreeRetentionOmitted)
+        )
+        expect(
+            aiCommandRetentionOmittedDecoded?.historyRetentionDays == 0
+                && handsFreeRetentionOmittedDecoded?.historyRetentionDays == 0,
+            "existing AI-command and hands-free settings without the key keep unlimited retention"
+        )
+
+        // 保存物は本人以外が読めない権限で作られること。umask既定(0644/0755)へ戻る退行を検出する。
+        let permissionRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("KoedexPermissionTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: permissionRoot) }
+        func posixMode(_ url: URL) -> Int? {
+            (try? FileManager.default.attributesOfItem(atPath: url.path))?[.posixPermissions] as? Int
+        }
+        let permissionSettingsRoot = permissionRoot.appendingPathComponent("settings", isDirectory: true)
+        let permissionSettingsStore = SettingsStore(storageRootURL: permissionSettingsRoot)
+        permissionSettingsStore.settings.historyRetentionDays = 30
+        permissionSettingsStore.flushPendingSave()
+        let permissionHistoryRoot = permissionRoot.appendingPathComponent("history", isDirectory: true)
+        let permissionHistoryStore = InputHistoryStore(storageRootURL: permissionHistoryRoot)
+        permissionHistoryStore.append(metadataOnlyEntry(), retentionDays: 30)
+        expect(
+            posixMode(permissionSettingsRoot) == StoragePermissions.directoryPosixPermissions
+                && posixMode(permissionSettingsRoot.appendingPathComponent("settings.json"))
+                    == StoragePermissions.filePosixPermissions,
+            "settings storage is created with owner-only directory and file permissions"
+        )
+        expect(
+            posixMode(permissionHistoryRoot.appendingPathComponent("history", isDirectory: true))
+                == StoragePermissions.directoryPosixPermissions
+                && posixMode(permissionHistoryRoot
+                    .appendingPathComponent("history", isDirectory: true)
+                    .appendingPathComponent("input_history.jsonl"))
+                    == StoragePermissions.filePosixPermissions,
+            "history storage is created with owner-only directory and file permissions"
+        )
+        // 是正はルート配下だけに作用し、symlink先の外部ファイルへは触れないこと。
+        let remediationRoot = permissionRoot.appendingPathComponent("remediate", isDirectory: true)
+        let outsideDirectory = permissionRoot.appendingPathComponent("outside", isDirectory: true)
+        try? FileManager.default.createDirectory(at: remediationRoot, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: outsideDirectory, withIntermediateDirectories: true)
+        let loosenedFile = remediationRoot.appendingPathComponent("loose.json")
+        let outsideFile = outsideDirectory.appendingPathComponent("outside.json")
+        try? Data("{}".utf8).write(to: loosenedFile)
+        try? Data("{}".utf8).write(to: outsideFile)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: loosenedFile.path)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: outsideFile.path)
+        try? FileManager.default.createSymbolicLink(
+            at: remediationRoot.appendingPathComponent("link.json"),
+            withDestinationURL: outsideFile
+        )
+        StoragePermissions.remediateStorageRoot(remediationRoot)
+        expect(
+            posixMode(loosenedFile) == StoragePermissions.filePosixPermissions
+                && posixMode(remediationRoot) == StoragePermissions.directoryPosixPermissions
+                && posixMode(outsideFile) == 0o644,
+            "startup remediation tightens existing storage without following symlinks out of the root"
+        )
+        // ハードリンクはinodeを共有するため、chmodがルート外へ波及する。
+        let hardlinkOutsideFile = outsideDirectory.appendingPathComponent("hardlinked.json")
+        try? Data("{}".utf8).write(to: hardlinkOutsideFile)
+        try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: hardlinkOutsideFile.path)
+        try? FileManager.default.linkItem(
+            at: hardlinkOutsideFile,
+            to: remediationRoot.appendingPathComponent("hardlink.json")
+        )
+        StoragePermissions.remediateStorageRoot(remediationRoot)
+        expect(
+            posixMode(hardlinkOutsideFile) == 0o644,
+            "startup remediation leaves hardlinked inodes shared with paths outside the root untouched"
+        )
+        // ルートが中間ディレクトリとして作られると attributes が効かず0755になる。
+        // ディレクトリ0700が最後の防衛線なので、サブディレクトリ経由でも0700を保つ。
+        let nestedRoot = permissionRoot.appendingPathComponent("nested-root", isDirectory: true)
+        _ = InputHistoryStore(storageRootURL: nestedRoot)
+        _ = PersonalDictionaryStore(storageRootURL: permissionRoot.appendingPathComponent("dict", isDirectory: true))
+        expect(
+            posixMode(nestedRoot) == StoragePermissions.directoryPosixPermissions
+                && posixMode(nestedRoot.appendingPathComponent("history", isDirectory: true))
+                    == StoragePermissions.directoryPosixPermissions,
+            "a storage root created as an intermediate directory is still owner-only"
+        )
+        // 設定が読めない時に既定の保持期間で履歴を消さないこと。
+        let unreadableSettingsRoot = permissionRoot.appendingPathComponent("unreadable", isDirectory: true)
+        StoragePermissions.ensureDirectory(at: unreadableSettingsRoot)
+        try? Data("{ this is not json".utf8)
+            .write(to: unreadableSettingsRoot.appendingPathComponent("settings.json"))
+        let unreadableStore = SettingsStore(storageRootURL: unreadableSettingsRoot)
+        expect(
+            unreadableStore.loadStatus == .failedToDecode
+                && !unreadableStore.canSave
+                && unreadableStore.settings.historyRetentionDays == 180,
+            "an unreadable settings file blocks saving while memory falls back to the default retention"
+        )
+
+        // 挿入直前のサニタイザ: ゼロ幅・双方向書式・C0/C1制御文字だけを除去し、
+        // tab/改行/復帰と可視文字は一切変更しない。
+        let invisibleLaden = "こんにちは\u{200B}世界\u{202E}です\u{0001}\u{0080}\u{007F}\u{2060}\u{E0041}\t\n\r。"
+        expect(
+            InvisibleCharacterSanitizer.sanitize(invisibleLaden) == "こんにちは世界です\t\n\r。",
+            "the insertion sanitizer strips zero-width, bidi-override, DEL, word-joiner, tag, and C0/C1 characters"
+        )
+        // 見た目に寄与する書式文字は除去しない。ZWJを落とすと絵文字が分裂し、
+        // 異体字セレクタやIVSを落とすと漢字の字形指定が失われる。
+        let visibleFormatting = "👩\u{200D}👩\u{200D}👧\u{200D}👦 🏳\u{FE0F}\u{200D}🌈 نامهای 葛\u{E0100}城 ✋🏽"
+        expect(
+            InvisibleCharacterSanitizer.sanitize(visibleFormatting) == visibleFormatting,
+            "the insertion sanitizer preserves ZWJ, ZWNJ, variation selectors, IVS, and skin-tone modifiers"
+        )
+        // AI整形が作るリスト構造（ハイフン箇条書き・「・」箇条書き・番号付け・
+        // インデント付き子項目・空行区切りの複数段落）は、非退行としてbyte-for-byte一致すること。
+        let formattedList = """
+        - 最初の項目
+        - 次の項目
+          - 内側の項目
+
+        ・箇条書きA
+        ・箇条書きB
+
+        1. 手順1
+        2. 手順2
+
+        最初の段落です。
+
+        次の段落です。
+        """
+        expect(
+            InvisibleCharacterSanitizer.sanitize(formattedList) == formattedList,
+            "AI-formatted bullet lists, numbered lists, indentation, and paragraph breaks are unchanged"
+        )
+        // `resolveHandsFreeSendTranscript`/`HandsFreeTranscriptResolution`は
+        // `AppDelegate`private members でこのファイルから直接呼べないため、その
+        // `.sendKeyOnly`分岐が使う判定そのもの（`isTriggerOnlyUtterance`）で
+        // 「トリガー句だけの発話は本文を挿入せず送信キーだけを送る」解決が
+        // このスコープの変更後も不変であることを固定する。
+        expect(
+            HandsFreeSendTriggerPolicy.isTriggerOnlyUtterance("ストップ送信", triggers: japanesePresetTriggers)
+                && HandsFreeSendTriggerPolicy.sanitizeFinalTranscript(
+                    "ストップ送信",
+                    triggers: japanesePresetTriggers
+                ) == nil,
+            "a trigger-phrase-only utterance still resolves to send-key-only with no text inserted"
+        )
 
         return finish()
     }

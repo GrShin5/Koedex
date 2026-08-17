@@ -614,10 +614,12 @@ actor AICommandEngine {
     init(executablePath: String? = nil) {
         self.executablePath = executablePath
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        let directory = (OnboardingRuntimeProfile.storageRootURL
-            ?? appSupport.appendingPathComponent("Koedex", isDirectory: true))
-            .appendingPathComponent("AICommandRuntime", isDirectory: true)
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let root = OnboardingRuntimeProfile.storageRootURL
+            ?? appSupport.appendingPathComponent("Koedex", isDirectory: true)
+        let directory = root.appendingPathComponent("AICommandRuntime", isDirectory: true)
+        // ルートを中間ディレクトリとして作らせるとattributesが効かず0755になる。
+        StoragePermissions.ensureDirectory(at: root)
+        StoragePermissions.ensureDirectory(at: directory)
         self.workingDirectory = directory.path
     }
 

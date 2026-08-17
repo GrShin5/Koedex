@@ -73,3 +73,18 @@ headless/CI-like environments — that is expected, not a failure.
   `Sources/Koedex/Resources/ja.lproj`) were updated.
 - For anything beyond a small fix, opening an issue to discuss the
   approach first is welcome but not required.
+
+## Licensing of contributions
+
+Koedex is licensed under the Apache License 2.0; see [LICENSE](LICENSE).
+
+Unless you state otherwise in writing, any contribution you intentionally
+submit for inclusion in Koedex is submitted under the same Apache License
+2.0, with no additional terms or conditions. This is the inbound=outbound
+rule described in Section 5 of the license itself, and submitting a pull
+request is taken as agreement to it.
+
+Only submit work you have the right to license this way. Do not paste code
+from sources under an incompatible license, and if a change is derived from
+third-party material, say so in the pull request so the attribution and
+[NOTICE](NOTICE) requirements can be handled before it is merged.

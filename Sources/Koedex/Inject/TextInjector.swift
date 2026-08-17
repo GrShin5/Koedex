@@ -107,6 +107,57 @@ enum UnverifiedExternalPastePolicy {
     static let allowsAutomaticPaste = false
 }
 
+/// 挿入直前に、画面に現れない制御・書式文字だけを除去する。ブラックリスト方式で、
+/// 可視文字（箇条書き記号・番号付けリストの記号・全角約物などを含む）は種類を問わず
+/// 一切変更しない。
+enum InvisibleCharacterSanitizer {
+    static func sanitize(_ text: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        for scalar in text.unicodeScalars where !isInvisible(scalar.value) {
+            scalars.append(scalar)
+        }
+        return String(scalars)
+    }
+
+    /// 除去するのは「表示に一切寄与しない」文字だけ。字形や結合に影響する書式文字
+    /// （ZWJ/ZWNJ、異体字セレクタ、IVS、結合文字、肌色修飾子）は可視文字の一部なので残す。
+    private static func isInvisible(_ value: UInt32) -> Bool {
+        switch value {
+        // C0制御文字（tab=0x09, LF=0x0A, CR=0x0Dは除く）
+        case 0x00...0x08, 0x0B, 0x0C, 0x0E...0x1F:
+            return true
+        // DEL＋C1制御文字。Unicodeのcategory Ccは0x00...0x1Fと0x7F...0x9F。
+        case 0x7F...0x9F:
+            return true
+        // ARABIC LETTER MARK / MONGOLIAN VOWEL SEPARATOR
+        case 0x061C, 0x180E:
+            return true
+        // ZERO WIDTH SPACE。0x200C(ZWNJ)と0x200D(ZWJ)は絵文字の連結や
+        // ペルシア語・ヒンディー語等の字形制御に必要なため除去しない。
+        case 0x200B:
+            return true
+        // 双方向書式・オーバーライド・分離文字
+        case 0x202A...0x202E, 0x2066...0x2069:
+            return true
+        // WORD JOINER と不可視演算子
+        case 0x2060...0x2064:
+            return true
+        // 行内注釈用の書式文字
+        case 0xFFF9...0xFFFB:
+            return true
+        // BOM / ZERO WIDTH NO-BREAK SPACE
+        case 0xFEFF:
+            return true
+        // タグ文字。完全に不可視で、隠しテキストの混入経路になる。
+        // 0xE0100...0xE01EF(IVS)は漢字の異体字指定に必須なので含めない。
+        case 0xE0000...0xE007F:
+            return true
+        default:
+            return false
+        }
+    }
+}
+
 /// ネイティブ入力欄はAccessibilityで直接置換する。
 ///
 /// macOSには外部アプリがCmd-Vの内容を受領したことを観測するAPIがない。そのため
@@ -119,6 +170,15 @@ final class TextInjector {
 
     func restorePendingScopedClipboardIfOwned() {
         scopedClipboardTextTransport.restorePendingClipboardIfOwned()
+    }
+
+    /// 挿入境界で必ず通す不可視文字の除去。元が非空なのに全て消えた場合はnilを返し、
+    /// 呼び出し側は何も挿入せず手動フォールバックへ倒す。空文字を挿入扱いにして
+    /// 送信キーだけが飛ぶ事態を防ぐため、判定はここへ一元化する。
+    private static func sanitizedForInsertion(_ text: String) -> String? {
+        let sanitized = InvisibleCharacterSanitizer.sanitize(text)
+        if !text.isEmpty, sanitized.isEmpty { return nil }
+        return sanitized
     }
 
     func insert(_ text: String) async -> TextInjectorResult {
@@ -158,6 +218,15 @@ final class TextInjector {
         if destination?.isSecureTextField == true {
             return NormalTextInsertionOutcome(
                 result: .secureInputBlocked,
+                sendEligibility: .notEligible
+            )
+        }
+
+        // 画面に現れない文字だけを除去する。ここで全ての本文が消えた場合は、
+        // 何も挿入せず送信キーも送らない（trigger-onlyの経路はここを通らない）。
+        guard let text = Self.sanitizedForInsertion(text) else {
+            return NormalTextInsertionOutcome(
+                result: .manualFallbackRequired,
                 sendEligibility: .notEligible
             )
         }
@@ -289,6 +358,7 @@ final class TextInjector {
 
     /// AIに指示のAX経路。選択開始時に束縛したdestination以外へは貼り付けない。
     func insert(_ text: String, at destination: InsertionDestination) async -> SafeTextInjectionResult {
+        guard let text = Self.sanitizedForInsertion(text) else { return .manualFallbackRequired }
         switch destination.replaceSelection(with: text) {
         case .inserted:
             return .inserted
@@ -314,6 +384,7 @@ final class TextInjector {
         for target: NormalPasteTarget,
         allowExternalCompatibility: Bool
     ) async -> SafeTextInjectionResult {
+        guard let text = Self.sanitizedForInsertion(text) else { return .manualFallbackRequired }
         let outcome = await submitExternalText(
             text,
             normalTarget: target,
@@ -342,6 +413,7 @@ final class TextInjector {
         operation: AICommandInsertionOperation,
         clipboardVariantEnabled: Bool
     ) async -> SafeTextInjectionResult {
+        guard let text = Self.sanitizedForInsertion(text) else { return .manualFallbackRequired }
         let hasStoppedTarget = target != nil
         let targetMatchesFrontmost = target?.matchesCurrentFrontmostApplication() ?? false
         let destinationMatchesTargetPID = hasStoppedTarget && destination?.processIdentifier == target?.processIdentifier

@@ -93,7 +93,7 @@ struct KoedexSettings: Codable, Equatable {
         codexExecutablePath: "",
         modelSettings: .default,
         historyEnabled: true,
-        historyRetentionDays: 0,
+        historyRetentionDays: 180,
         historyDisplayLimit: 50,
         settingsDisplayScale: 1,
         customInstructionOptimizationModelSettings: .optimizationDefault,
@@ -398,7 +398,7 @@ struct AICommandSettings: Codable, Equatable {
         webSearchEnabled: true,
         additionalInstruction: "",
         historyEnabled: true,
-        historyRetentionDays: 0,
+        historyRetentionDays: 180,
         clipboardVariantEnabled: false,
         // Optionは製品上の既定値。CommandとControlも固有に使用不可ではなく、
         // 現在の開始Chordと組み合わせた結果に対してeligibilityを判定する。
@@ -619,7 +619,7 @@ final class SettingsStore: ObservableObject {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             dir = appSupport.appendingPathComponent("Koedex", isDirectory: true)
         }
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        StoragePermissions.ensureDirectory(at: dir)
         self.fileURL = dir.appendingPathComponent("settings.json")
         // 設定の意味を変える移行ごとに、直前の完全なJSONを残す。
         // 既存のpre-v9バックアップは上書きしない。
@@ -756,12 +756,14 @@ final class SettingsStore: ObservableObject {
         // Data.WritingOptionsはatomicとwithoutOverwritingを併用できない。
         // 既存バックアップを守ることを優先し、上書き禁止で一度だけ作成する。
         try data.write(to: backupURL, options: .withoutOverwriting)
+        StoragePermissions.applyFileMode(to: backupURL)
     }
 
     private static func writeVerified(settings: KoedexSettings, to fileURL: URL) throws {
         let data = try JSONEncoder().encode(settings)
         _ = try JSONDecoder().decode(KoedexSettings.self, from: data)
         try data.write(to: fileURL, options: .atomic)
+        StoragePermissions.applyFileMode(to: fileURL)
     }
 
     func flushPendingSave() {

@@ -61,10 +61,23 @@ offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported by opening an issue on this repository. If you would prefer not
-to raise your report publicly, note that in the issue and a maintainer
-will follow up with you privately. All complaints will be reviewed and
-investigated promptly and fairly.
+reported privately to the maintainer. Please do not open a public issue to
+report a conduct concern.
+
+To report privately, open the **Security** tab of this repository, then
+**Advisories** → **Report a vulnerability**, and state at the top of your
+report that it concerns conduct rather than a vulnerability. This creates a
+private thread between you and the maintainer, separate from the public
+issue tracker. It is the same private channel described in
+[SECURITY.md](SECURITY.md); it is reused here because it is the only
+maintainer-facing private channel this repository has.
+
+Koedex is maintained by a single person. If your report concerns the
+maintainer, or you would otherwise prefer not to route it through this
+repository, report it to GitHub directly through their abuse reporting
+form at https://github.com/contact/report-abuse instead.
+
+All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of
 the reporter of any incident.

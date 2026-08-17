@@ -816,18 +816,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "development"
         let revision = bundle.object(forInfoDictionaryKey: "KoedexBuildGitSHA") as? String ?? "unknown"
         AppLog.shared.info("[Telemetry] launch version=\(version) build=\(build) revision=\(revision)")
-        inputHistoryStore.prune(retentionDays: settingsStore.settings.historyRetentionDays)
-        inputHistoryStore.prune(
-            mode: InputHistoryMode.aiCommand,
-            retentionDays: settingsStore.settings.aiCommandSettings.historyRetentionDays
-        )
-        inputHistoryStore.prune(
-            mode: InputHistoryMode.handsFreeSend,
-            retentionDays: settingsStore.settings.handsFreeSendSettings.historyRetentionDays
-        )
+        // 設定が読めなかった場合、settingsはメモリ上の既定値になっている。その既定の
+        // 保持期間でpruneすると、ユーザーが選んでいない基準で履歴が削除される。
+        // 保存が無効化されている間は、履歴も消さない。
+        if settingsStore.canSave {
+            inputHistoryStore.prune(retentionDays: settingsStore.settings.historyRetentionDays)
+            inputHistoryStore.prune(
+                mode: InputHistoryMode.aiCommand,
+                retentionDays: settingsStore.settings.aiCommandSettings.historyRetentionDays
+            )
+            inputHistoryStore.prune(
+                mode: InputHistoryMode.handsFreeSend,
+                retentionDays: settingsStore.settings.handsFreeSendSettings.historyRetentionDays
+            )
+        } else {
+            AppLog.shared.warn("設定を読めなかったため、履歴の保持期間による削除は行いません")
+        }
 
         // 過去起動時の孤児app-serverプロセスが残っていれば後始末する。
         PidFileManager.shared.cleanupOrphanFromPreviousRun()
+
+        // 起動のたびに一度、既存の保存済みディレクトリ・ファイルの権限を0700/0600へ是正する（べき等）。
+        // 履歴やAICommandRuntimeの件数に上限がないため、全走査で起動を待たせない。
+        let appSupportRoot = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let storageRoot = OnboardingRuntimeProfile.storageRootURL
+            ?? appSupportRoot.appendingPathComponent("Koedex", isDirectory: true)
+        Task.detached(priority: .utility) {
+            StoragePermissions.remediateStorageRoot(storageRoot)
+        }
 
         // CLIテストモードの処理（--test-cleanup / --test-stt）。該当すれば実行して終了する。
         if handleCLITestModeIfRequested() {
@@ -2923,6 +2939,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         sendAfterInsert: SendAfterInsertRequest?
     ) async {
         guard ownsCurrentNormalProcessing(session) else { return }
+        // 挿入・送信キーの本文照合・履歴・手動フォールバックが同じ文字列を見るよう、
+        // ここで一度だけ不可視文字を除去する。TextInjector側の除去はこの後は冪等に働く。
+        // 除去して空になった場合は元の文字列を渡し、拒否の判断はTextInjectorへ委ねる。
+        let sanitizedTextToInsert = InvisibleCharacterSanitizer.sanitize(textToInsert)
+        let textToInsert = sanitizedTextToInsert.isEmpty ? textToInsert : sanitizedTextToInsert
         appState.setPhase(.inserting)
         let insertStartedAt = Date()
         let insertionOutcome = await textInjector.insert(

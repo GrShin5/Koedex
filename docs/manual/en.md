@@ -516,7 +516,7 @@ key and the stop key.**
 | --- | --- | --- | --- |
 | Enable AI Command mode | On | Turning it off disables this mode's launch key | Yes |
 | Use Web search for AI questions | On | AI searches the web when it decides it's needed. See [Chapter 8](#about-the-web-search-decision) for details | Yes |
-| Input history retention | Unlimited | How many days of AI Command mode history stay | Yes |
+| Input history retention | 180 days | How many days of AI Command mode history stay | Yes |
 | Clipboard mode | Off (only shown if conditions are met) | Adding an extra key to the chord targets your clipboard's contents instead of your selected text | Yes |
 
 #### Confirming the launch key and stop key
@@ -1043,7 +1043,7 @@ web whenever it decides that's needed.
 
 | Item | Default | Choices |
 | --- | --- | --- |
-| History retention (three, one per mode) | Unlimited | Do not save / 1 day / 30 days / 180 days / Unlimited |
+| History retention (three, one per mode) | 180 days | Do not save / 1 day / 30 days / 180 days / Unlimited |
 | History display limit | 50 | 50 / 100 / 200 / All |
 
 | Note | Detail |
@@ -1153,7 +1153,9 @@ screen.
 | --- | --- |
 | Setting scope | Configured independently per mode |
 | Entry-count limit | **None.** Only the number of days controls automatic deletion |
+| Default | 180 days on a new install. If you were already using Koedex, your existing setting is kept unchanged |
 | Storage location | `~/Library/Application Support/Koedex/history/input_history.jsonl` |
+| File permissions | Saved so that only your account can read them. Other accounts on the same Mac cannot |
 
 ---
 
@@ -2182,8 +2184,8 @@ Once it launches, continue with [6. First-time setup](#6-first-time-setup).
 
 | Item | Detail |
 | --- | --- |
-| Release covered | v0.1.1 |
-| App version covered | 0.1.1 |
+| Release covered | v0.1.2 |
+| App version covered | 0.1.2 |
 | Manual language | English |
 
 This manual was written against the source code in the release above. Newer versions may

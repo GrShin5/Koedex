@@ -89,12 +89,12 @@ final class OnboardingRestartIntentStore {
     }
 
     func save(_ intent: OnboardingRestartIntent) throws {
-        try fileManager.createDirectory(
-            at: fileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+        // セットアップ中はこの経路がストレージルートを最初に作ることがある。
+        // ここで0700にしておかないと、次回起動の是正までルートが0755のまま残る。
+        StoragePermissions.ensureDirectory(at: fileURL.deletingLastPathComponent())
         let data = try encoder.encode(intent)
         try data.write(to: fileURL, options: .atomic)
+        StoragePermissions.applyFileMode(to: fileURL)
     }
 
     func load(bundleIdentifier: String) -> OnboardingRestartIntent? {
