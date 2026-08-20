@@ -11,21 +11,16 @@ enum OnboardingRuntimeProfile {
     static let productionBundleIdentifier = "com.koedex.app"
     static let debugBundleIdentifier = "com.koedex.onboarding-debug"
     static let debugApplicationSupportName = "Koedex Debug"
-    static let languageSetupDebugBundleIdentifier = "com.koedex.language-setup-debug"
-    static let languageSetupDebugApplicationSupportName = "Koedex Language Setup Debug"
 
     enum RuntimeKind: Equatable {
         case normal
         case onboardingDebug
-        case languageSetupDebug
     }
 
     static var runtimeKind: RuntimeKind {
         switch Bundle.main.bundleIdentifier {
         case debugBundleIdentifier:
             return .onboardingDebug
-        case languageSetupDebugBundleIdentifier:
-            return .languageSetupDebug
         default:
             return .normal
         }
@@ -39,18 +34,12 @@ enum OnboardingRuntimeProfile {
         runtimeKind == .onboardingDebug
     }
 
-    static var isLanguageSetupDebug: Bool {
-        runtimeKind == .languageSetupDebug
-    }
-
     static func applicationSupportName(for runtimeKind: RuntimeKind) -> String {
         switch runtimeKind {
         case .normal:
             return productionApplicationSupportName
         case .onboardingDebug:
             return debugApplicationSupportName
-        case .languageSetupDebug:
-            return languageSetupDebugApplicationSupportName
         }
     }
 
@@ -72,7 +61,7 @@ enum OnboardingRuntimeProfile {
         switch runtimeKind {
         case .normal:
             return nil
-        case .onboardingDebug, .languageSetupDebug:
+        case .onboardingDebug:
             return applicationSupportRootURL(named: applicationSupportName)
         }
     }
@@ -92,9 +81,10 @@ enum OnboardingRuntimeProfile {
     }
 }
 
-/// Language Setup Debugの初期状態を、実行時副作用なしで生成する純粋な方針。
+/// Debug.appを「新規インストール直後」へ戻すための初期状態を、実行時副作用なしで
+/// 生成する純粋な方針。言語選択からやり直すために使う。
 /// 実際にどの保存先へ適用するかは呼び出し側のSettingsStoreに委ねる。
-enum LanguageSetupDebugResetPolicy {
+enum DebugFreshSetupResetPolicy {
     static func freshSettings() -> KoedexSettings {
         .default
     }
@@ -108,15 +98,15 @@ enum OnboardingPresentationMode: Equatable {
     case guide
     case debugPreview
     case debugRehearsal
-    case languageSetupPreview
-    case languageSetupRehearsal
 
-    var isPreview: Bool { self == .debugPreview || self == .languageSetupPreview }
-    var isLiveDebugRehearsal: Bool { self == .debugRehearsal || self == .languageSetupRehearsal }
+    var isPreview: Bool { self == .debugPreview }
+    var isLiveDebugRehearsal: Bool { self == .debugRehearsal }
     var isDebug: Bool { isPreview || isLiveDebugRehearsal }
     var isGuide: Bool { self == .guide }
+    /// Debugも初回セットアップと同じく言語選択から始める。専用のDebug.appを分けずに
+    /// 言語選択を実機確認できるようにするため、ここで`.firstRun`と同じ扱いにする。
     var usesInitialLanguageSelection: Bool {
-        self == .firstRun || self == .languageSetupPreview || self == .languageSetupRehearsal
+        self == .firstRun || isDebug
     }
 
     /// 任意ガイドは既存セットアップの完了状態を変更しない。
@@ -138,8 +128,6 @@ enum OnboardingPresentationMode: Equatable {
         case .guide: japanese = "セットアップガイド"
         case .debugPreview: japanese = "Koedex Debug — プレビュー"
         case .debugRehearsal: japanese = "Koedex Debug — 実機確認"
-        case .languageSetupPreview: japanese = "言語セットアップ Debug — プレビュー"
-        case .languageSetupRehearsal: japanese = "言語セットアップ Debug — 実機確認"
         }
         return AppLocalizer.text(japanese, language: language)
     }
@@ -153,12 +141,31 @@ enum OnboardingPresentationMode: Equatable {
 enum HandsFreeSendOnboardingPolicy {
     static func showsOptionalToggle(in mode: OnboardingPresentationMode) -> Bool {
         switch mode {
-        case .firstRun, .upgrade, .debugPreview, .debugRehearsal,
-             .languageSetupPreview, .languageSetupRehearsal:
+        case .firstRun, .upgrade, .debugPreview, .debugRehearsal:
             return true
         case .permissionRecovery, .guide:
             return false
         }
+    }
+}
+
+/// セットアップでハンズフリー送信を選んだ時に、何を一緒に切り替えるか。
+/// 選んだ人は外部アプリでも使えることを期待しているため、設定画面で個別に
+/// 有効化し直さずに済むよう「外部アプリでも自動送信する」も同時に切り替える。
+/// 送信は取り消せないので、この連動はセットアップ画面の説明文に明記してある。
+///
+/// ただし設定画面は、この同意を互換入力モードがONの時しか受け付けない
+/// （OFFの間はトグル自体が操作できない）。互換入力OFFのまま同意だけを立てると、
+/// 本人が下ろせない状態が残り、あとで互換入力をONに戻した瞬間に自動送信が
+/// 有効になってしまう。そのため、ここでも同じ前提を要求する。
+enum HandsFreeSendOnboardingActivation {
+    static func apply(
+        enabled: Bool,
+        externalCompatibilityEnabled: Bool,
+        to settings: inout HandsFreeSendSettings
+    ) {
+        settings.enabled = enabled
+        settings.allowExternalAutoSend = enabled && externalCompatibilityEnabled
     }
 }
 
@@ -167,8 +174,7 @@ enum HandsFreeSendOnboardingPolicy {
 enum AICommandClipboardVariantOnboardingPolicy {
     static func showsOptionalToggle(in mode: OnboardingPresentationMode) -> Bool {
         switch mode {
-        case .firstRun, .upgrade, .debugPreview, .debugRehearsal,
-             .languageSetupPreview, .languageSetupRehearsal:
+        case .firstRun, .upgrade, .debugPreview, .debugRehearsal:
             return true
         case .permissionRecovery, .guide:
             return false
@@ -198,13 +204,11 @@ enum OnboardingFlow {
     ) -> [OnboardingStep] {
         var result: [OnboardingStep]
         switch mode {
-        case .firstRun, .languageSetupPreview, .languageSetupRehearsal:
+        case .firstRun, .debugPreview, .debugRehearsal:
             result = [.welcome, .permissions, .voice, .preferences, .aiCommand, .practice, .complete]
             if !hasCompletedInitialLanguageSelection {
                 result.insert(.language, at: 0)
             }
-        case .debugPreview, .debugRehearsal:
-            result = [.welcome, .permissions, .voice, .preferences, .aiCommand, .practice, .complete]
         case .upgrade:
             result = []
             if !allPermissionsGranted {

@@ -1,3 +1,12 @@
+/* English translations for the Japanese literals that double as localization keys.
+   scripts/check_localization_coverage.py fails when a literal reaching a translation
+   call has no entry here.
+
+   Some entries no longer match any literal in Sources/. They are kept on purpose: if one
+   of them turns out to still be produced at runtime, it renders in English instead of
+   Japanese. Do not sweep them out just because nothing references them — removing an
+   entry here removes that safety net, and the coverage check only reads source to
+   strings, never the other way. */
 "Koedexへようこそ" = "Welcome to Koedex";
 "Koedex 設定" = "Koedex Settings";
 "新しい使い方を確認" = "Review what's new";
@@ -141,6 +150,7 @@
 "音声入力結果" = "Voice input result";
 "ハンズフリー送信モード" = "Hands-free send mode";
 "ハンズフリー送信モードを有効にする" = "Enable hands-free send mode";
+"チェックを付けると、互換入力モードがONの場合に限り、設定画面の「外部アプリでも自動送信する」も同時にONになります。ブラウザやチャットアプリでも自動送信されるようになるため、不要な場合は設定画面でOFFにできます。" = "Turning this on also turns on “Auto-send in external apps” in Settings, but only if Compatibility Input Mode is on at that point, so Koedex will auto-send in browsers and chat apps too. You can turn that back off in Settings if you do not want it.";
 "通常モードと同じ文字起こし・AI整形を使います。音声トリガーまたはもう一度起動キーを押すと録音を終了します。本文を安全に挿入でき、送信が許可されている場合だけ、設定した送信キーを自動送信します。送信できた後は取り消せません。" = "Uses the same transcription and AI cleanup as Standard mode. A spoken trigger or pressing the launch key again ends recording. Only after text is inserted safely and sending is permitted does Koedex automatically send the configured send key. A successful send cannot be undone.";
 "開始: %@" = "Start: %@";
 "停止: %@" = "Stop: %@";
@@ -162,8 +172,10 @@
 "AI処理をリセットしています。" = "Resetting AI processing...";
 "AI処理をリセットしました。" = "AI processing has been reset.";
 "処理が終わってからもう一度お試しください。" = "Please try again once the current processing finishes.";
+"処理を完了できませんでした。少し待ってから、もう一度お試しください。" = "Koedex could not complete the request. Wait a moment and try again.";
 "音声トリガー後の認識結果を安全に確定できなかったため、自動挿入・送信を中止しました。内容を確認してコピーしてください。" = "The recognized text after the spoken trigger could not be finalized safely, so automatic insertion and sending were cancelled. Review the text and copy it.";
 "音声トリガーを安全に除去できなかったため、自動挿入・送信を中止しました。内容を確認してコピーしてください。" = "The spoken trigger could not be removed safely, so automatic insertion and sending were cancelled. Review the text and copy it.";
+"AI整形を完了できなかったため、ハンズフリーでの自動挿入・送信を中止しました。内容を確認してコピーしてください。" = "AI cleanup could not be completed, so hands-free automatic insertion and sending were cancelled. Review the text and copy it.";
 "Function + 右Shiftで開始し、発話の最後に「%@」と言うと、録音を終了して本文を挿入した後にReturnを送信します。同じキーをもう一度押しても終了して送信できます。送信キー、カスタムフレーズ、外部アプリでの自動送信は設定で変更できます。" = "Start with Function + Right Shift. Say \"%@\" at the end of your speech to end recording, insert the text, and send Return. Pressing the same key again also ends recording and sends. You can change the send key, custom phrase, and external-app auto-send in Settings.";
 "セットアップ完了後は、設定の「ハンズフリー送信モード」から詳しく変更できます。" = "After setup, you can adjust details in Settings under Hands-free send mode.";
 "このキーの組み合わせは使用できません。1〜3個のキーを選び、複数キーでは修飾キーを含めてください。" = "This key combination cannot be used. Choose one to three keys, and include a modifier in combinations.";
@@ -318,6 +330,7 @@
 "キーを入力中…" = "Listening for keys…";
 "キーを入力する" = "Enter key";
 "キーを入力してください。すべてのキーを離すと候補を表示します。" = "Press the key or keys. The candidate appears after you release them all.";
+"キーを入力してください。すべてのキーを離すと候補を表示します。Escで取消できます。" = "Press the keys you want. Releasing them all shows the candidate. Press Esc to cancel.";
 "候補: %@" = "Candidate: %@";
 "このキーを設定する" = "Use this key";
 "このキーを設定しました" = "This key is set";
@@ -352,7 +365,11 @@
 "録音は最長10分です。設定した時間で自動停止し、10分を超えて録音することはできません。" = "Recording lasts at most ten minutes. It stops automatically at the selected time and cannot continue past ten minutes.";
 "選択したマイクが見つからない場合は、システムのデフォルト入力へ自動的にフォールバックします。" = "If the selected microphone is unavailable, the app automatically falls back to the system default input.";
 "Codex実行ファイルの場所（詳細設定）" = "Codex executable location (Advanced)";
-"現在Codexに接続できていません（%@）。必要な場合だけパスを指定し、保存するとCodexに再接続されます。" = "Koedex is not currently connected to Codex (%@). Specify a path only if needed; saving reconnects to Codex.";
+"Codexに接続できていません（%@）。［自動検出をやり直す］を押すか、［ファイルを選択…］でcodexの場所を指定してください。" = "Koedex is not connected to Codex (%@). Choose “Detect again”, or use “Choose file…” to point Koedex at your codex executable.";
+"自動検出をやり直す" = "Detect again";
+"ファイルを選択…" = "Choose file…";
+"codex実行ファイルを選択してください" = "Select the codex executable";
+"選択" = "Select";
 "空欄で自動検出" = "Leave blank for automatic discovery";
 "表示はインストール済みCodex CLIに基づきます。最新モデルが表示されない場合は、Codex CLIを最新版へ更新し、［モデル一覧を更新］を押してください。更新後も表示されない場合は、アカウントまたはワークスペースの提供状況を確認してください。" = "The list is based on the installed Codex CLI. If the newest models are missing, update the Codex CLI and choose Refresh model list. If they are still missing, check availability for your account or workspace.";
 "履歴の保持" = "History retention";
@@ -455,16 +472,11 @@
 "挿入を確認できませんでした。クリップボードは新しいコピーで変更されている可能性があります。" = "Insertion could not be confirmed. The clipboard may have been changed by a newer copy.";
 "音声モデルの準備が時間内に完了しませんでした。現在の言語のままにして、しばらくしてからもう一度試してください。" = "The speech model was not ready in time. Your current language is unchanged; try again shortly.";
 
-"言語セットアップ Debug" = "Language Setup Debug";
-"言語セットアップ Debugを開く" = "Open Language Setup Debug";
-"言語セットアップ Debug.appを終了" = "Quit Language Setup Debug.app";
-"初回セットアップの言語と履歴保存方針を、本番とは別の保存先で確認します。" = "Review the first-run language and history-retention choices in storage isolated from the production app.";
 "まだ完了していません。プレビューまたは実機確認から、初回セットアップを開始してください。" = "Setup is not complete yet. Start the initial setup from Preview or Device test.";
 "画面をプレビュー" = "Preview screens";
 "プレビューを開く" = "Open preview";
 "このMacで確認" = "Test on this Mac";
 "実機確認を開く" = "Open device test";
-"言語と履歴保存方針を含む初回セットアップを、権限・マイク・ショートカットの疑似状態で確認します。macOSの権限や本番データには触れません。" = "Preview first-run setup, including language and history-retention choices, with simulated permissions, microphone, and shortcuts. It does not touch macOS permissions or production data.";
 "この専用Debug.appの権限・マイク・グローバルショートカットだけを使います。Codex接続や履歴本文の保存、本番設定には触れません。" = "Uses only this dedicated Debug.app's permissions, microphone, and global shortcuts. It does not start Codex, save history text, or touch production settings.";
 "言語セットアップ状態をリセット" = "Reset language-setup state";
 "隔離された設定値の確認" = "Isolated settings check";
@@ -477,6 +489,12 @@
 "Koedex 初回セットアップ Debug" = "Koedex Onboarding Debug";
 "このDebug.appの権限、マイク、グローバルショートカットを使って確認します。録音結果は画面だけに表示し、Codex処理・履歴保存は行いません。" = "Test with this Debug.app's permissions, microphone, and global shortcuts. Recording results appear only on screen; no Codex processing or history saving occurs.";
 "セットアップ状態のリセットは進捗だけを初期化します。macOSの権限は変更しません。" = "Resetting setup state clears only progress. It does not change macOS permissions.";
+"セットアップ状態のリセットは進捗だけを初期化します。macOSの権限は変更しません。言語選択画面から確認したい場合は「Debug設定を新規インストール直後に戻す」を使ってください。" = "Resetting the setup state only clears progress. It does not change macOS permissions. To check the flow from the language choice onward, use “Reset Debug settings to a fresh install”.";
+"Debug設定を新規インストール直後に戻す" = "Reset Debug settings to a fresh install";
+"Debug設定を新規インストール直後に戻しますか？" = "Reset Debug settings to a fresh install?";
+"このDebug.appの隔離された設定を全て初期化します。言語、ユーザー辞書、ショートカット、履歴の保持日数、Codexの設定も戻ります。本番Koedexの設定・履歴・辞書には触れません。" = "This clears every isolated setting in this Debug app, including the languages, the personal dictionary, the shortcuts, the history retention, and the Codex settings. It does not touch production Koedex settings, history, or dictionaries.";
+"初期化" = "Reset";
+"Debug用のセットアップは完了状態です。「Debug設定を新規インストール直後に戻す」を押すと、言語選択から確認し直せます。" = "Debug setup is complete. Press “Reset Debug settings to a fresh install” to run through it again from the language choice.";
 "保存先: ~/Library/Application Support/Koedex Debug/" = "Storage: ~/Library/Application Support/Koedex Debug/";
 "前のアプリが終了したら、権限の確認画面を自動で開きます。" = "The permission review opens automatically after the previous app exits.";
 "本番のKoedexとは別の保存先を使います。ここで完了・リセットしても、本番の設定、履歴、辞書、ログ、Codex接続には影響しません。" = "Uses storage separate from production Koedex. Completing or resetting here does not affect production settings, history, dictionaries, logs, or Codex connections.";
@@ -504,7 +522,9 @@
 "開始キーは1〜3個、停止キーは1個です。複数キーの開始設定には修飾キーを含めます。" = "The start key uses one to three keys and the stop key uses one. A multi-key start shortcut must include a modifier key.";
 
 "macOSの「🌐キーを押して」機能と競合するため、システム設定→キーボード→「🌐キーを押して」を「何もしない」に変更してください。" = "This conflicts with macOS's Press Globe key setting. In System Settings > Keyboard, set Press Globe key to Do Nothing.";
-"通常は空欄のままで問題ありません。メニューバーに「Codex接続エラー」が出る場合だけ、ターミナルで" = "Usually, leave this blank. Only when “Codex connection error” appears in the menu bar, run";
+"通常は空欄のままで問題ありません。空欄のときは、npm・nvm・fnm・Volta・Homebrew などの標準的な場所と、ログインシェルのPATHから自動で探します。" = "Usually you can leave this blank. When it is blank, Koedex looks in the standard locations used by npm, nvm, fnm, Volta and Homebrew, and in your login shell’s PATH.";
+"接続できていない場合は、まず［自動検出をやり直す］を押してください。それでも見つからないときは［ファイルを選択…］でcodex実行ファイルを直接指定できます。" = "If Koedex is not connected, start with “Detect again”. If that still does not find it, use “Choose file…” to point Koedex at the codex executable directly.";
+"ターミナルを使う場合は" = "If you prefer the terminal, run";
 "を実行し、表示されたパス（例:" = "and paste the displayed path (for example,";
 "のようなパス）をこの欄に貼り付けてください。保存するとCodexに再接続され、設定が反映されます。" = ") into this field. Saving reconnects to Codex and applies the setting.";
 "欄に読み込む" = "Load into field";
@@ -532,8 +552,6 @@
 "左⌃ (Control)" = "Left ⌃ (Control)";
 "修飾キー (code %d)" = "Modifier key (code %d)";
 "キー (code %d)" = "Key (code %d)";
-"言語セットアップ Debug — プレビュー" = "Language Setup Debug — Preview";
-"言語セットアップ Debug — 実機確認" = "Language Setup Debug — Device test";
 "codex CLIが見つかりません。設定でパスを指定してください" = "Codex CLI was not found. Specify its path in Settings.";
 "Codexへの再接続状態を確認できませんでした" = "Could not confirm the Codex reconnection status.";
 "選択したモデルまたは推論レベルは現在利用できません。モデル一覧を更新して選び直してください。" = "The selected model or reasoning effort is not currently available. Refresh the model list and choose again.";
@@ -542,7 +560,6 @@
 "選択テキストの取得がタイムアウトしました" = "Timed out while retrieving selected text.";
 "録音の開始がタイムアウトしました" = "Timed out while starting recording.";
 "Koedex Debug" = "Koedex Debug";
-"本番アプリとは別の保存先で、初回の言語と履歴保存方針を確認できます。" = "You can verify the first-run language and history-retention choices in storage isolated from the production app.";
 "通常モードのキーは1つだけ選んでください。" = "Choose exactly one key for Standard mode.";
 "開始キーは1〜3個のキーで設定してください。" = "Set the start key with one to three keys.";
 "複数キーの開始キーには、修飾キーを含めてください。" = "A multi-key start shortcut must include a modifier key.";
@@ -565,15 +582,11 @@
 "出力をクリップボードに残しました。必要なら⌘Vで貼り付けてください。" = "The output remains on the clipboard. Press ⌘V to paste it if needed.";
 "挿入を確認できませんでした。出力は入力済みか、クリップボードへ残っている可能性があります。" = "Insertion could not be confirmed. The output may already be in the input or remain on the clipboard.";
 "下に設定が続きます" = "Scroll for more settings";
-"権限と初回テスト状態をリセットしますか？" = "Reset permissions and first-run test state?";
-"権限と初回テスト状態をリセット" = "Reset permissions and first-run test state";
-"Koedex Language Setup Debugだけのマイク・音声認識・アクセシビリティなどのmacOS権限と、隔離されたDebug設定・初回セットアップ状態を初期化します。本番Koedex、既存Debug.app、通常の履歴・辞書・設定には触れません。完了後はこのDebug.appを終了します。" = "This resets microphone, speech-recognition, Accessibility, and other macOS permissions for Koedex Language Setup Debug only, along with its isolated Debug settings and first-run state. It does not touch production Koedex, the existing Debug.app, or normal history, dictionaries, and settings. This Debug.app quits when it finishes.";
 "%@の権限をリセットしています…" = "Resetting permissions for %@…";
 "%@の権限をリセットしました。アプリを終了して開き直すと、macOSの許可ダイアログをもう一度確認できます。" = "Permissions for %@ were reset. Quit and reopen the app to review macOS permission dialogs again.";
 "%@の権限をリセットできませんでした。macOSのシステム設定から確認してください。" = "Could not reset permissions for %@. Check macOS System Settings.";
 "%@の権限リセットを開始できませんでした。macOSのシステム設定から確認してください。" = "Could not start the permission reset for %@. Check macOS System Settings.";
 "許可されていないアプリでは権限リセットを実行できません。" = "Permission reset is not available in this app.";
-"Koedex Language Setup Debug" = "Koedex Language Setup Debug";
 "model_preset_luna_low" = "GPT-5.6 Luna / low (fast, cost-efficient)";
 "model_preset_luna_medium" = "GPT-5.6 Luna / medium (balanced)";
 "model_preset_terra_low" = "GPT-5.6 Terra / low (light everyday use)";
@@ -628,6 +641,7 @@
 "ON: 選択本文の編集結果に加え、音声で明示した回答も、録音停止時の同じアプリにある入力先へ直接挿入します。AXで欄を確認できない場合は、互換入力モードで試行します。明示的に別表示を指定した結果と、安全に入力先を確認できない結果は別ウィンドウに表示します。\nOFF: 外部アプリでは結果を別ウィンドウに表示します（コピー可）。" = "ON: In addition to edits of selected text, directly inserts answers explicitly requested by voice into the input target in the same app when recording stops. If Accessibility cannot inspect the field, Koedex tries Compatibility Input. Results explicitly requested for separate display, and results whose target cannot be verified safely, are shown in a separate window.\nOFF: In external apps, results are shown in a separate window that you can copy.";
 "安全な入力が有効な間は録音を開始できません。パスワード入力などを閉じてから、もう一度試してください。" = "Recording cannot start while Secure Input is active. Close the password field or similar input, then try again.";
 "指定された入力先への挿入を安全に確認できなかったため、結果を別ウィンドウに表示しています。" = "Koedex could not safely verify insertion into the requested input target, so the result is shown in a separate window.";
+"結果が長すぎて、この入力欄へ直接入力できませんでした。下の本文をコピーして貼り付けてください。" = "The result was too long to type directly into this input field. Copy the text below and paste it.";
 "外部アプリでは、本文入力後も録音停止時と同じ編集可能な入力欄を確認できた場合だけReturn系キーを自動送信します。確認できない場合は、文字だけ入力して送信しません。" = "In external apps, Koedex automatically sends a Return key only when it can still confirm the same editable input field captured when recording stopped. Otherwise, it enters only the text and does not send it.";
 "ブラウザやElectronアプリでは、本文反映を確認できないことがあります。送信は取り消せません。本文入力後も録音停止時と同じ編集可能な入力欄を確認できた時だけ、Enter系キーを自動送信することを許可します。確認できない場合は文字だけ入力します。" = "Browsers and Electron apps may not let Koedex verify that text was reflected. Sending cannot be undone. Allow Koedex to automatically press an Enter-type key only when it can still confirm the same editable input field captured when recording stopped. Otherwise it enters only the text.";
 "互換入力モードをONにすると、外部アプリでの選択取得と、クリップボードを変更しない仮想入力を使った直接入力を許可します。入力欄によっては反映を確認できないことがあります。" = "When Compatibility Input Mode is ON, Koedex allows selection capture and direct input using virtual input that does not change the clipboard. Some fields may not expose confirmation that text was reflected.";
@@ -669,7 +683,6 @@
 "Google DocsやNotionのように、Koedexが「いま選択されている文字」を読み取れないアプリがあります。この設定はその回避策で、選択のかわりに自分でコピーしたものをAIへ渡します。\n\n例：Google Docsで書いた段落を英訳したい\n　1. 段落を選んで、自分で ⌘C でコピーする\n　2. %@ を押しながら、いつもの「AIに指示」の開始キーを押す\n　3. 「英語にして」と話す\n　4. Koedexはカーソル位置への挿入を試みます\n\n・%@ は開始キーが完成する前に押してください（既定ではSpaceより前）。修飾キー同士の順番は問いません。後から押すと、いつもの「AIに指示」になります\n・追加キーは左右どちらでも同じです\n・安全な入力が有効な間、秘匿指定・Koedex自身の出力・テキスト以外・長すぎる内容はAIへ渡さず中止します。読めない場合に一般質問へ切り替えることはありません\n・貼り付けが反映されたかをKoedexは確認できません。入らなかった時は、メニューバーの「最後のAI出力をコピー」から取り出せます\n・入力後、Koedexが所有していたクリップボードだけを復元します。途中であなたや他のアプリが新しくコピーした内容は上書きしません\n・この設定は「互換入力モード」とは別です。ONにしても他の設定は変わりません" = "Some apps, such as Google Docs and Notion, do not let Koedex read the text currently selected. This setting is a workaround: instead of a selection, you copy the text yourself and Koedex sends that copy to AI.\n\nExample: translating a paragraph you wrote in Google Docs\n  1. Select the paragraph and copy it yourself with ⌘C\n  2. Hold %@ and press your usual AI Command start key\n  3. Say \"translate this into English\"\n  4. Koedex attempts to insert the result at the cursor\n\n• Press %@ before completing the start key (by default, before Space). The order among modifier keys does not matter. Pressing it afterwards runs the usual AI Command\n• Either the left or the right key works\n• While Secure Input is active, content marked confidential, Koedex's own output, non-text content, and overlong content are not sent to AI. Koedex stops rather than switching to a general question when it cannot read the content\n• Koedex cannot confirm that the paste landed. If nothing appears, use Copy Last AI Output in the menu bar\n• After input, Koedex restores only clipboard contents it still owns. It never overwrites content newly copied by you or another app\n• This setting is separate from Compatibility Input Mode. Turning it on changes nothing else";
 "Google DocsやNotionのように、選択した文字をKoedexが読み取れないアプリがあります。そうしたアプリでは、自分で ⌘C でコピーしてから %@ を押しながら開始キーを押すと、コピーした内容をAIが編集し、Koedexはカーソル位置への挿入を試みます。%@ は開始キーが完成する前に押してください（既定ではSpaceより前）。修飾キー同士の順番は問いません。後から押すと、いつもの「AIに指示」になります。安全な入力が有効な間、秘匿指定・Koedex自身の出力・テキスト以外・長すぎる内容はAIへ渡さず中止します。読めない場合に一般質問へ切り替えることはありません。クリップボード本文は履歴に保存せず、音声指示だけを「AIに指示」履歴に保存します。追加キーは設定画面で変更できます。" = "Some apps, such as Google Docs and Notion, do not let Koedex read selected text. In those apps, copy the text yourself with ⌘C, then hold %@ and press the start key: AI edits the copied text and Koedex attempts to insert it at the cursor. Press %@ before completing the start key (by default, before Space). The order among modifier keys does not matter. Pressing it afterwards runs the usual AI Command. While Secure Input is active, content marked confidential, Koedex's own output, non-text content, and overlong content are not sent to AI. Koedex stops rather than switching to a general question when it cannot read the content. Clipboard text is not saved in history; only the spoken instruction is saved in AI Command history. You can change the extra key later in Settings.";
 "このDebug.appの権限、マイク、グローバルショートカットを使って確認します。録音結果は画面だけに表示し、Codex処理・Web検索・クリップボード読取・履歴保存は行いません。" = "Test with this Debug.app's permissions, microphone, and global shortcuts. Recording results appear only on screen; no Codex processing, Web search, clipboard reading, or history saving occurs.";
-"この専用Debug.appの権限・マイク・グローバルショートカットだけを使います。Codex接続、Web検索、クリップボード読取、履歴本文の保存、本番設定には触れません。" = "Uses only this dedicated Debug.app's permissions, microphone, and global shortcuts. It does not connect to Codex, search the Web, read the clipboard, save history text, or touch production settings.";
 "録音中は画面下のHUDに状態が表示されます。×で取り消し、✓で停止できます。色や外枠はモードや状態の目安なので、色だけに頼らず表示内容を確認してください。" = "While recording, the HUD at the bottom of the screen shows the current state. Use × to cancel and ✓ to stop. Colors and outlines are only cues for mode and state, so also check the displayed content.";
 "モデルはセットアップ完了後に設定画面で確認・変更できます。Web検索は選択したモデルの対応状況に従います。" = "You can review and change the model in Settings after setup. Web search follows the selected model's support.";
 

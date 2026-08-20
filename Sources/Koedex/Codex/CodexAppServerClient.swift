@@ -158,31 +158,14 @@ actor CodexAppServerClient {
     /// ProcessInfoの環境を土台にするので、HOME等（~/.codex解決に必須）はそのまま継承される。
     static func buildChildEnvironment() -> [String: String] {
         var env = ProcessInfo.processInfo.environment
-        let home = NSHomeDirectory()
-        let fm = FileManager.default
 
-        var candidates: [String] = [
-            home + "/.npm-global/bin",      // npm prefix（本環境のcodex実体がここ）
-            home + "/.volta/bin",           // Volta
-            "/opt/homebrew/bin",            // Apple Silicon Homebrew
-            "/opt/homebrew/opt/node/bin",   // Homebrew node keg (ARM)
-            "/usr/local/bin",               // Intel Homebrew
-            "/usr/local/opt/node/bin",      // Homebrew node keg (Intel)
-        ]
-
-        // nvm: ~/.nvm/versions/node/<version>/bin をバージョン降順（新しい順）で展開する
-        let nvmRoot = home + "/.nvm/versions/node"
-        if let versions = try? fm.contentsOfDirectory(atPath: nvmRoot) {
-            let sorted = versions.sorted { $0.compare($1, options: .numeric) == .orderedDescending }
-            candidates.append(contentsOf: sorted.map { "\(nvmRoot)/\($0)/bin" })
-        }
-
-        // 実在するディレクトリのみ採用し、既存PATH＋基本パスと重複排除して連結する
+        // 候補ディレクトリはCodexPathResolverと共有する（CodexBinaryLocations）。
+        // 実在するディレクトリのみ採用し、既存PATH＋基本パスと重複排除して連結する。
         let basePaths = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
         let existing = (env["PATH"] ?? "").split(separator: ":").map(String.init)
         var seen = Set<String>()
         var merged: [String] = []
-        for path in candidates.filter({ fm.fileExists(atPath: $0) }) + existing + basePaths {
+        for path in CodexBinaryLocations.toolDirectories() + existing + basePaths {
             guard !path.isEmpty, seen.insert(path).inserted else { continue }
             merged.append(path)
         }
@@ -331,7 +314,9 @@ actor CodexAppServerClient {
                 "clientInfo": [
                     "name": "Koedex",
                     "title": "Koedex",
-                "version": "0.1.1",
+                // アプリ版数を名乗る。`scripts/make_app.sh` のCFBundleShortVersionStringと
+                // 一緒に上げること。バンドル外実行でもnilにならないよう定数で持つ。
+                "version": "0.1.3",
                 ],
                 "capabilities": [
                     "experimentalApi": false,

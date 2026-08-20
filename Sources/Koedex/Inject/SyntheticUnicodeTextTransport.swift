@@ -23,6 +23,12 @@ enum SyntheticUnicodeTextTransport {
         count > 0 && count <= maximumUTF16Length
     }
 
+    /// 送れなかった理由が「上限超過」だけであることを判定する。空本文も
+    /// `canSubmitUTF16Count`ではfalseになるため、長さを理由に挙げる前にここで分ける。
+    static func exceedsMaximumUTF16Length(_ count: Int) -> Bool {
+        count > maximumUTF16Length
+    }
+
     static func submit(
         _ text: String,
         to target: NormalPasteTarget

@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parent.parent
 DOCS_DIR = ROOT / "docs" / "manual"
 DIST_DIR = ROOT / "dist" / "manual"
-DEFAULT_VERSION = "0.1.1"
+DEFAULT_VERSION = "0.1.3"
 
 LANGS = [
     {

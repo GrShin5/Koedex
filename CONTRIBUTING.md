@@ -26,7 +26,7 @@ swift build
 ```
 
 The first time you assemble an `.app` bundle you will need a stable local
-code-signing certificate; see the README's "Install / build from source"
+code-signing certificate; see the README's "Install"
 section for the one-time `scripts/make_signing_cert.sh` setup.
 
 ## Running the checks

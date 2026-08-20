@@ -121,8 +121,6 @@ private struct MainWindowContent: View {
     var body: some View {
         if OnboardingRuntimeProfile.isOnboardingDebug {
             OnboardingDebugLauncherView(settingsStore: appDelegate.settingsStore)
-        } else if OnboardingRuntimeProfile.isLanguageSetupDebug {
-            LanguageSetupDebugLauncherView(settingsStore: appDelegate.settingsStore)
         } else {
             SettingsView(
                 store: appDelegate.settingsStore,
@@ -154,13 +152,6 @@ private struct MainMenuBarContent: View {
             }
             Divider()
             Button(AppLocalizer.text("Debug.appを終了", language: uiLanguage)) { NSApp.terminate(nil) }
-        } else if OnboardingRuntimeProfile.isLanguageSetupDebug {
-            Button(AppLocalizer.text("言語セットアップ Debugを開く", language: uiLanguage)) {
-                openWindow(id: "main-window")
-                NSApp.activate(ignoringOtherApps: true)
-            }
-            Divider()
-            Button(AppLocalizer.text("言語セットアップ Debug.appを終了", language: uiLanguage)) { NSApp.terminate(nil) }
         } else {
             MenuBarContentView(
                 appDelegate: appDelegate,
@@ -244,9 +235,6 @@ struct KoedexApp: App {
         let language = appDelegate.settingsStore.settings.languagePreferences.uiLanguage
         if OnboardingRuntimeProfile.isOnboardingDebug {
             return AppLocalizer.text("Koedex Debug", language: language)
-        }
-        if OnboardingRuntimeProfile.isLanguageSetupDebug {
-            return AppLocalizer.text("言語セットアップ Debug", language: language)
         }
         return AppLocalizer.text("Koedex 設定", language: language)
     }
@@ -772,6 +760,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     @Published var menuBarIconName = "mic"
     @Published var codexStatus: CodexConnectionStatus = .unknown
+    /// アクティブ化のたびに再接続を撃たないための、最後に再試行した時刻。
+    private var lastCodexActivationRetryAt: Date?
     @Published private(set) var isApplyingLanguageProfile = false
     /// クリップボードバリアントの貼り付けを送出した直近のAI出力。メモリ上のみで、
     /// ディスクへは書かない。履歴（`InputHistoryStore`）へも渡さない。次のAI実行で
@@ -982,6 +972,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         return trimmed.isEmpty ? nil : trimmed
     }
 
+    /// 自動探索でcodexを見つけられた時、そのパスを設定へ一度だけ書き込む。
+    /// 2回目以降の起動でシェル起動のコストが消える。ユーザーが明示指定している間は触らない。
+    /// 保存済みパスが実行不可になればCodexPathResolver側で再探索されるため、
+    /// nvmのバージョン切り替えでパスが変わっても自力で復帰する。
+    private func persistAutoResolvedCodexPathIfNeeded() async {
+        guard nonEmptyCodexPath(settingsStore.settings.codexExecutablePath) == nil else { return }
+        let resolved = await Task.detached(priority: .utility) {
+            CodexPathResolver.resolve(settingsPath: nil)
+        }.value
+        guard let resolved,
+              nonEmptyCodexPath(settingsStore.settings.codexExecutablePath) == nil else { return }
+        settingsStore.settings.codexExecutablePath = resolved
+        settingsStore.flushPendingSave()
+        AppLog.shared.info("codex実行ファイルの場所を自動で保存しました")
+    }
+
+    /// 接続に失敗している時だけ、アプリがアクティブになったタイミングで再接続を試みる。
+    /// 裏でCodex CLIを入れ直した／ログインし直した場合に、操作なしで復帰させるため。
+    private func retryCodexConnectionOnActivationIfNeeded() {
+        guard case .failed = codexStatus else { return }
+        let now = Date()
+        if let last = lastCodexActivationRetryAt, now.timeIntervalSince(last) < 30 { return }
+        lastCodexActivationRetryAt = now
+        AppLog.shared.info("Codex接続を再試行します（アプリがアクティブになったため）")
+        retryCodexConnection()
+    }
+
     private var uiLanguage: AppLanguage {
         settingsStore.settings.languagePreferences.uiLanguage
     }
@@ -1025,6 +1042,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             consecutiveUnclassifiedRPCFailures = 0
             codexStatus = .connected
             AppLog.shared.info("Codex接続チェック成功（thread prewarm完了）")
+            await persistAutoResolvedCodexPathIfNeeded()
         } catch CodexClientError.codexNotFound {
             codexStatus = .failed("codex CLIが見つかりません")
             AppLog.shared.error("codex CLIが見つかりません。設定でパスを指定してください")
@@ -1553,6 +1571,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     func applicationDidBecomeActive(_ notification: Notification) {
         reassertHUDIfAvailable()
+        retryCodexConnectionOnActivationIfNeeded()
     }
 
     /// Debug.appは通常アプリの副作用を止めるためHUDを作らない。
@@ -3040,6 +3059,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 textToInsert,
                 notice: uiText("以前のクリップボード内容が失われた可能性があります。必要な内容を確認してください。")
             )
+        case .manualFallbackRequired where insertionOutcome.fallbackReason == .payloadTooLong:
+            // 通常モードにも同じ上限がある。理由を伏せると「短い文は入るのに長い文は
+            // 入らない」が不具合に見えるため、「AIに指示」と同じ説明を出す。
+            appState.setPhase(.idle)
+            hud.hide()
+            presentNormalInputFallback(
+                textToInsert,
+                notice: payloadTooLongInsertionFallbackNotice()
+            )
         case .secureInputBlocked, .manualFallbackRequired, .insertionUnconfirmed, .failed,
              // クリップボードバリアントの3ケースは「AIに指示」専用経路（`insertAICommandOutput`）
              // だけが返す。通常モードの`insert(...)`からは構築されないため、ここには到達しない。
@@ -3270,6 +3298,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         case .clipboardVariantPasteMayHaveLostClipboard: return "clipboard_variant_clipboard_lost"
         case .externalCompatibilityDisabled: return "external_compatibility_disabled"
         case .manualFallbackRequired: return "manual_fallback_required"
+        case .payloadTooLongForDirectInsertion: return "payload_too_long"
         case .insertionUnconfirmed: return "insertion_unconfirmed"
         case .nonEditable: return "non_editable"
         case .selectionNotCollapsed: return "selection_not_collapsed"
@@ -3904,6 +3933,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 sources: sources,
                 notice: isExplicitTargetInsertion ? explicitTargetInsertionFallbackNotice() : nil
             )
+        case .payloadTooLongForDirectInsertion:
+            // 短い結果は入るのに長い結果だけ別ウィンドウへ出るのは、理由を伏せると
+            // 不具合に見える。挿入先の種類に関わらず、長さが原因であることを伝える。
+            presentAICommandOutputResult(
+                text,
+                instruction: instruction,
+                session: session,
+                sources: sources,
+                notice: payloadTooLongInsertionFallbackNotice()
+            )
         case .failed:
             finishAICommandWithFailure(ownerID: session.id)
         }
@@ -3933,6 +3972,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     private func explicitTargetInsertionFallbackNotice() -> String {
         uiText("指定された入力先への挿入を安全に確認できなかったため、結果を別ウィンドウに表示しています。")
+    }
+
+    private func payloadTooLongInsertionFallbackNotice() -> String {
+        uiText("結果が長すぎて、この入力欄へ直接入力できませんでした。下の本文をコピーして貼り付けてください。")
     }
 
     private func showAICommandResult(

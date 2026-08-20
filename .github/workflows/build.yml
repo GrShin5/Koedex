@@ -35,6 +35,30 @@ jobs:
         # 動くようになった場合（SKIP=0）は通ります。この数字を動かす時はレビューが必要です。
         run: .build/debug/Koedex --test-regressions --max-skips 13
 
+      - name: Localization coverage
+        # 日本語の文字列リテラルがそのままローカライズキーなので、対訳を書き忘れると
+        # 英語UIに日本語が出ます。この検査はそれを見つけます。
+        #
+        # このゲートは配布物に含めない開発時ツールです。存在しない環境ではビルドを
+        # 落とさず飛ばします（scripts/preflight.sh と同じ扱い）。**飛ばした事実は
+        # 必ず出力に残します。** 黙って通すと、走っていないことに気付けません。
+        run: |
+          if [[ -f scripts/check_localization_coverage.py ]]; then
+            python3 scripts/check_localization_coverage.py
+          else
+            echo "skipped: scripts/check_localization_coverage.py is not present"
+          fi
+
+      - name: Script tests
+        # 公開スナップショットのゲートとローカライズ検査のテスト。
+        # 上と同じ理由で、存在しない環境では飛ばします。
+        run: |
+          if [[ -d scripts/tests ]]; then
+            python3 -m unittest discover -s scripts/tests -p 'test_*.py'
+          else
+            echo "skipped: scripts/tests is not present"
+          fi
+
       - name: Log hygiene
         # エラーを丸ごと文字列へ補間すると、NSErrorのuserInfo経由で NSFilePath / NSURL /
         # underlying error が展開され、絶対パスがログやCLI出力へ入ります。ログは不具合報告

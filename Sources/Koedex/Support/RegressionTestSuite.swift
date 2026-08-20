@@ -2332,8 +2332,6 @@ enum RegressionTestSuite {
                     && AICommandClipboardVariantOnboardingPolicy.showsOptionalToggle(in: .upgrade)
                     && AICommandClipboardVariantOnboardingPolicy.showsOptionalToggle(in: .debugPreview)
                     && AICommandClipboardVariantOnboardingPolicy.showsOptionalToggle(in: .debugRehearsal)
-                    && AICommandClipboardVariantOnboardingPolicy.showsOptionalToggle(in: .languageSetupPreview)
-                    && AICommandClipboardVariantOnboardingPolicy.showsOptionalToggle(in: .languageSetupRehearsal)
                     && !AICommandClipboardVariantOnboardingPolicy.showsOptionalToggle(in: .guide)
                     && !AICommandClipboardVariantOnboardingPolicy.showsOptionalToggle(in: .permissionRecovery),
                 "AI command clipboard variant onboarding control is available in new, upgrade, and Debug setup flows"
@@ -2689,6 +2687,48 @@ enum RegressionTestSuite {
             )
 
             expect(
+                isSafeResult(TextInjector.mapSafeResult(NormalTextInsertionOutcome(
+                    result: .manualFallbackRequired,
+                    sendEligibility: .notEligible,
+                    fallbackReason: .payloadTooLong
+                ))) {
+                    if case .payloadTooLongForDirectInsertion = $0 { return true }
+                    return false
+                }
+                    // 理由の無い退避は従来どおり。長さ以外の失敗まで「長すぎる」と
+                    // 説明してしまうと、利用者が誤った対処へ誘導される。
+                    && isSafeResult(TextInjector.mapSafeResult(NormalTextInsertionOutcome(
+                        result: .manualFallbackRequired,
+                        sendEligibility: .notEligible
+                    ))) {
+                        if case .manualFallbackRequired = $0 { return true }
+                        return false
+                    }
+                    && isSafeResult(TextInjector.mapSafeResult(NormalTextInsertionOutcome(
+                        result: .secureInputBlocked,
+                        sendEligibility: .notEligible,
+                        fallbackReason: .payloadTooLong
+                    ))) {
+                        if case .secureInputBlocked = $0 { return true }
+                        return false
+                    }
+                    && AppDelegate.describeSafeInsertionResult(.payloadTooLongForDirectInsertion)
+                        == "payload_too_long"
+                    && AppDelegate.describeSafeInsertionResult(.manualFallbackRequired)
+                        == "manual_fallback_required",
+                "an over-long payload reaches the result window with its reason intact instead of collapsing into a generic manual fallback"
+            )
+
+            // 空本文も`canSubmitUTF16Count`ではfalseになる。「長すぎる」と説明してよいのは
+            // 上限を超えた時だけで、空本文に同じ説明を出すと誤った対処へ誘導する。
+            expect(
+                SyntheticUnicodeTextTransport.exceedsMaximumUTF16Length(391)
+                    && !SyntheticUnicodeTextTransport.exceedsMaximumUTF16Length(390)
+                    && !SyntheticUnicodeTextTransport.exceedsMaximumUTF16Length(0),
+                "only an over-length payload is attributed to length, never an empty one"
+            )
+
+            expect(
                 AppDelegate.describeInsertionResult(.clipboardVariantPasteConfirmed)
                     != AppDelegate.describeInsertionResult(.clipboardVariantPasteSubmittedUnverified)
                     && AppDelegate.describeInsertionResult(.clipboardVariantPasteConfirmed) == "clipboard_variant_confirmed"
@@ -2838,19 +2878,28 @@ enum RegressionTestSuite {
         )
         expect(
             languageFirstOnboardingSteps == [.language, .welcome, .permissions, .voice, .preferences, .aiCommand, .practice, .complete]
-                && !OnboardingFlow.steps(
+                // Debug.appを1つに統合したので、言語選択はDebugでも同じ経路を通る。
+                // ここを緩めると、言語選択を実機確認する手段がまた失われる。
+                && OnboardingFlow.steps(
                     mode: .debugRehearsal,
                     progress: .newInstall,
                     allPermissionsGranted: false,
                     hasCompletedInitialLanguageSelection: false
-                ).contains(.language)
+                ).first == .language
                 && OnboardingFlow.steps(
-                    mode: .languageSetupRehearsal,
+                    mode: .debugPreview,
                     progress: .newInstall,
                     allPermissionsGranted: false,
                     hasCompletedInitialLanguageSelection: false
-                ).first == .language,
-            "new normal installs and Language Setup Debug start with language choice while existing Debug stays isolated"
+                ).first == .language
+                // 選択済みなら出さない。ここが崩れると毎回言語選択から始まってしまう。
+                && !OnboardingFlow.steps(
+                    mode: .debugRehearsal,
+                    progress: .newInstall,
+                    allPermissionsGranted: false,
+                    hasCompletedInitialLanguageSelection: true
+                ).contains(.language),
+            "new installs and Debug alike start at the language choice, and skip it once it is done"
         )
         var initialLanguagePreferences = LanguagePreferences.newInstall
         initialLanguagePreferences.applyInitialSelection(.english)
@@ -2987,31 +3036,30 @@ enum RegressionTestSuite {
                 && dynamicErrorState.statusText(language: .english) == "Error: \(dynamicErrorDetail)",
             "dynamic errors preserve already-localized text while known and generated Codex keys remain translated"
         )
+        // Debug.appは1つだけ。本番と隔離された保存先を使うことは変わらない。
         expect(
-            OnboardingRuntimeProfile.languageSetupDebugBundleIdentifier == "com.koedex.language-setup-debug"
-                && OnboardingRuntimeProfile.languageSetupDebugApplicationSupportName == "Koedex Language Setup Debug"
+            OnboardingRuntimeProfile.debugBundleIdentifier == "com.koedex.onboarding-debug"
+                && OnboardingRuntimeProfile.debugApplicationSupportName == "Koedex Debug"
                 && OnboardingRuntimeProfile.historyFileDisplayPath(for: .normal)
                     == "~/Library/Application Support/Koedex/history/input_history.jsonl"
-                && OnboardingRuntimeProfile.historyFileDisplayPath(for: .languageSetupDebug)
-                    == "~/Library/Application Support/Koedex Language Setup Debug/history/input_history.jsonl"
-                && OnboardingFlow.steps(
-                    mode: .languageSetupPreview,
-                    progress: .newInstall,
-                    allPermissionsGranted: false,
-                    hasCompletedInitialLanguageSelection: false
-                ).first == .language,
-            "Language Setup Debug uses an isolated identity and starts at the real language choice"
+                && OnboardingRuntimeProfile.historyFileDisplayPath(for: .onboardingDebug)
+                    == "~/Library/Application Support/Koedex Debug/history/input_history.jsonl"
+                && OnboardingRuntimeProfile.applicationSupportName(for: .onboardingDebug)
+                    != OnboardingRuntimeProfile.applicationSupportName(for: .normal),
+            "the single Debug app keeps an isolated identity and storage root"
         )
-        let languageSetupDebugResetSettings = LanguageSetupDebugResetPolicy.freshSettings()
+        let debugFreshSetupSettings = DebugFreshSetupResetPolicy.freshSettings()
         expect(
-            languageSetupDebugResetSettings == .default
-                && languageSetupDebugResetSettings.historyEnabled
-                && languageSetupDebugResetSettings.historyRetentionDays == 180
-                && languageSetupDebugResetSettings.aiCommandSettings.historyEnabled
-                && languageSetupDebugResetSettings.aiCommandSettings.historyRetentionDays == 180
-                && languageSetupDebugResetSettings.setupProgress == .newInstall
-                && languageSetupDebugResetSettings.languagePreferences == .newInstall,
-            "Language Setup Debug reset restores the isolated new-install defaults"
+            debugFreshSetupSettings == .default
+                && debugFreshSetupSettings.historyEnabled
+                && debugFreshSetupSettings.historyRetentionDays == 180
+                && debugFreshSetupSettings.aiCommandSettings.historyEnabled
+                && debugFreshSetupSettings.aiCommandSettings.historyRetentionDays == 180
+                && debugFreshSetupSettings.setupProgress == .newInstall
+                // 言語選択が未完了へ戻ることが、言語選択画面から確認し直せる条件。
+                && debugFreshSetupSettings.languagePreferences == .newInstall
+                && !debugFreshSetupSettings.languagePreferences.hasCompletedInitialLanguageSelection,
+            "the Debug fresh-setup reset restores new-install defaults and reopens the language choice"
         )
         expect(
             OnboardingFlow.initialStepIndex(
@@ -3054,8 +3102,6 @@ enum RegressionTestSuite {
                 && HandsFreeSendOnboardingPolicy.showsOptionalToggle(in: .upgrade)
                 && HandsFreeSendOnboardingPolicy.showsOptionalToggle(in: .debugPreview)
                 && HandsFreeSendOnboardingPolicy.showsOptionalToggle(in: .debugRehearsal)
-                && HandsFreeSendOnboardingPolicy.showsOptionalToggle(in: .languageSetupPreview)
-                && HandsFreeSendOnboardingPolicy.showsOptionalToggle(in: .languageSetupRehearsal)
                 && !HandsFreeSendOnboardingPolicy.showsOptionalToggle(in: .guide)
                 && !HandsFreeSendOnboardingPolicy.showsOptionalToggle(in: .permissionRecovery),
             "hands-free-send onboarding control is available in new, upgrade, and Debug setup flows"
@@ -3826,15 +3872,20 @@ enum RegressionTestSuite {
             DebugPermissionResetTarget.isIsolatedDebugBundleIdentifier(
                 OnboardingRuntimeProfile.debugBundleIdentifier
             )
-                && DebugPermissionResetTarget.isIsolatedDebugBundleIdentifier(
-                    OnboardingRuntimeProfile.languageSetupDebugBundleIdentifier
-                )
                 && !DebugPermissionResetTarget.isIsolatedDebugBundleIdentifier(
                     "com.koedex.app"
                 )
                 && !DebugPermissionResetTarget.onboarding.permitsReset(
-                    from: OnboardingRuntimeProfile.languageSetupDebugBundleIdentifier
-                ),
+                    from: OnboardingRuntimeProfile.productionBundleIdentifier
+                )
+                && !DebugPermissionResetTarget.onboarding.permitsReset(from: nil)
+                // 肯定側が無いと、常にfalseを返す実装でもこのテストは通ってしまう。
+                && DebugPermissionResetTarget.onboarding.permitsReset(
+                    from: OnboardingRuntimeProfile.debugBundleIdentifier
+                )
+                // Debug.appは1つだけ。増やす時は「別の許可済みバンドルからは不可」という
+                // 一致条件をもう一度確かめること。
+                && DebugPermissionResetTarget.allCases.count == 1,
             "permission reset is limited to its matching isolated debug bundle"
         )
         expect(
@@ -5144,6 +5195,48 @@ enum RegressionTestSuite {
             "settings JSON missing the clipboard-variant fields decodes to defaults without triggering a schemaVersion migration"
         )
 
+        // 互換入力モードの既定を新規インストール向けにONへ変えたので、実ファイル経由でも
+        // 既存ユーザーがOFFのままであることを確かめる。JSONDecoder単体ではなく、
+        // ユーザーが実際に通るSettingsStoreの読込経路で見る。
+        let existingWithoutCompatibilitySection: [String: Any] = [
+            "schemaVersion": KoedexSettings.currentSchemaVersion,
+            "historyRetentionDays": 30,
+        ]
+        let existingCompatibilityRoot = storageRootURL.appendingPathComponent(
+            "external-compatibility-existing-json", isDirectory: true
+        )
+        try? FileManager.default.createDirectory(
+            at: existingCompatibilityRoot,
+            withIntermediateDirectories: true
+        )
+        if let existingCompatibilityData = try? JSONSerialization.data(
+            withJSONObject: existingWithoutCompatibilitySection
+        ) {
+            try? existingCompatibilityData.write(
+                to: existingCompatibilityRoot.appendingPathComponent("settings.json")
+            )
+        }
+        let existingCompatibilityStore = SettingsStore(storageRootURL: existingCompatibilityRoot)
+        expect(
+            existingCompatibilityStore.loadStatus == .loaded
+                && existingCompatibilityStore.settings.externalAppCompatibilitySettings == .legacyDefault
+                && existingCompatibilityStore.settings.historyRetentionDays == 30,
+            "an existing settings.json without the compatibility section loads with it still off"
+        )
+
+        // settings.jsonが無い＝新規インストールなので、そちらは新しい既定でONになる。
+        let freshCompatibilityRoot = storageRootURL.appendingPathComponent(
+            "external-compatibility-fresh", isDirectory: true
+        )
+        let freshCompatibilityStore = SettingsStore(storageRootURL: freshCompatibilityRoot)
+        expect(
+            freshCompatibilityStore.loadStatus == .newInstall
+                && freshCompatibilityStore.settings.externalAppCompatibilitySettings.enabled
+                && freshCompatibilityStore.settings.externalAppCompatibilitySettings
+                    .autoReplaceAICommandSelection,
+            "a storage root with no settings.json starts with compatibility input on"
+        )
+
         let compatibilitySettingsCombinations = [
             ExternalAppCompatibilitySettings(enabled: false, autoReplaceAICommandSelection: false, allowScopedClipboardFallback: false),
             ExternalAppCompatibilitySettings(enabled: false, autoReplaceAICommandSelection: true, allowScopedClipboardFallback: true),
@@ -5270,6 +5363,9 @@ enum RegressionTestSuite {
         )
         let supportRejectedRoot = storageRootURL.appendingPathComponent("support-scoped-paste-rejected", isDirectory: true)
         let supportRejectedStore = SettingsStore(storageRootURL: supportRejectedRoot)
+        // 新規インストールの互換入力モードは既定ONなので、この検証の前提である
+        // 「互換入力がOFF」の状態を明示的に作ってから叩く。
+        supportRejectedStore.settings.externalAppCompatibilitySettings.setEnabledFromVisibleControl(false)
         let beforeRejectedEnable = supportRejectedStore.settings
         let rejectedEnable = ScopedClipboardFallbackSupportCommand.execute(
             action: .enable,
@@ -6336,6 +6432,152 @@ enum RegressionTestSuite {
             aiCommandRetentionOmittedDecoded?.historyRetentionDays == 0
                 && handsFreeRetentionOmittedDecoded?.historyRetentionDays == 0,
             "existing AI-command and hands-free settings without the key keep unlimited retention"
+        )
+
+        // 互換入力モードは、ONでないと挿入できない外部アプリが多いため新規インストールでは既定ON。
+        // 一方で、すでに使っている人の同意状態を勝手に変えてはならない。
+        expect(
+            KoedexSettings.default.externalAppCompatibilitySettings.enabled
+                && KoedexSettings.default.externalAppCompatibilitySettings.autoReplaceAICommandSelection
+                && !KoedexSettings.default.externalAppCompatibilitySettings.allowScopedClipboardFallback,
+            "fresh install enables compatibility input and AI-result insertion but not the support-only paste path"
+        )
+        let compatibilityBaseData = try! JSONEncoder().encode(KoedexSettings.default)
+        var compatibilitySectionOmitted = try! JSONSerialization.jsonObject(
+            with: compatibilityBaseData
+        ) as! [String: Any]
+        compatibilitySectionOmitted.removeValue(forKey: "externalAppCompatibilitySettings")
+        let compatibilitySectionOmittedDecoded = try? JSONDecoder().decode(
+            KoedexSettings.self,
+            from: try! JSONSerialization.data(withJSONObject: compatibilitySectionOmitted)
+        )
+        expect(
+            compatibilitySectionOmittedDecoded?.externalAppCompatibilitySettings == .legacyDefault,
+            "existing settings without the compatibility section stay off, not on the new default"
+        )
+        var compatibilityKeysOmitted = compatibilitySectionOmitted
+        compatibilityKeysOmitted["externalAppCompatibilitySettings"] = [String: Any]()
+        let compatibilityKeysOmittedDecoded = try? JSONDecoder().decode(
+            KoedexSettings.self,
+            from: try! JSONSerialization.data(withJSONObject: compatibilityKeysOmitted)
+        )
+        expect(
+            compatibilityKeysOmittedDecoded?.externalAppCompatibilitySettings == .legacyDefault,
+            "existing settings with an empty compatibility section stay off"
+        )
+        // 全falseの往復だけでは、保存値を無視して .legacyDefault を返す実装でも通ってしまう。
+        // OFFとONの両方向を見る。
+        var compatibilityExplicitOff = KoedexSettings.default
+        compatibilityExplicitOff.externalAppCompatibilitySettings.setEnabledFromVisibleControl(false)
+        compatibilityExplicitOff.externalAppCompatibilitySettings.autoReplaceAICommandSelection = false
+        let compatibilityExplicitOffDecoded = try? JSONDecoder().decode(
+            KoedexSettings.self,
+            from: try! JSONEncoder().encode(compatibilityExplicitOff)
+        )
+        var compatibilityExplicitOn = KoedexSettings.default
+        compatibilityExplicitOn.externalAppCompatibilitySettings = ExternalAppCompatibilitySettings(
+            enabled: true,
+            autoReplaceAICommandSelection: true,
+            allowScopedClipboardFallback: false
+        )
+        let compatibilityExplicitOnDecoded = try? JSONDecoder().decode(
+            KoedexSettings.self,
+            from: try! JSONEncoder().encode(compatibilityExplicitOn)
+        )
+        // v23のファイルに互換入力ONが保存されている既存ユーザー。マイグレーション分岐が
+        // 触ってよいのはallowScopedClipboardFallbackだけで、同意そのものは保持される。
+        let legacyCompatibilityOnJSON: [String: Any] = [
+            "schemaVersion": 23,
+            "externalAppCompatibilitySettings": [
+                "enabled": true,
+                "autoReplaceAICommandSelection": true,
+                "allowScopedClipboardFallback": true,
+            ],
+        ]
+        let legacyCompatibilityOnDecoded = try? JSONDecoder().decode(
+            KoedexSettings.self,
+            from: try! JSONSerialization.data(withJSONObject: legacyCompatibilityOnJSON)
+        )
+        expect(
+            compatibilityExplicitOffDecoded?.externalAppCompatibilitySettings
+                == compatibilityExplicitOff.externalAppCompatibilitySettings
+                && compatibilityExplicitOnDecoded?.externalAppCompatibilitySettings
+                    == compatibilityExplicitOn.externalAppCompatibilitySettings
+                && legacyCompatibilityOnDecoded?.externalAppCompatibilitySettings.enabled == true
+                && legacyCompatibilityOnDecoded?.externalAppCompatibilitySettings
+                    .autoReplaceAICommandSelection == true,
+            "an explicitly saved compatibility choice is preserved on decode, on or off"
+        )
+        // 設定ファイルが壊れていても、同意が要る設定まで新規インストール向けの既定へ上げない。
+        expect(
+            KoedexSettings.safeFallback.externalAppCompatibilitySettings == .legacyDefault
+                && KoedexSettings.safeFallback.historyRetentionDays
+                    == KoedexSettings.default.historyRetentionDays,
+            "the fallback used when settings cannot be decoded leaves external consent off"
+        )
+
+        // セットアップでハンズフリー送信を選んだ人は、外部アプリでも使えることを期待している。
+        // 外すと両方戻すのは、チェックだけ外して同意が残る状態を作らないため。
+        var handsFreeActivation = HandsFreeSendSettings.default
+        HandsFreeSendOnboardingActivation.apply(
+            enabled: true,
+            externalCompatibilityEnabled: true,
+            to: &handsFreeActivation
+        )
+        let handsFreeActivationTurnedBothOn = handsFreeActivation.enabled
+            && handsFreeActivation.allowExternalAutoSend
+        HandsFreeSendOnboardingActivation.apply(
+            enabled: false,
+            externalCompatibilityEnabled: true,
+            to: &handsFreeActivation
+        )
+        expect(
+            handsFreeActivationTurnedBothOn
+                && !handsFreeActivation.enabled
+                && !handsFreeActivation.allowExternalAutoSend,
+            "the onboarding hands-free checkbox turns external auto-send on and off with it"
+        )
+        // 互換入力OFFのまま同意だけを立てると、設定画面ではトグルが操作できないため
+        // 本人が下ろせない。あとで互換入力をONに戻した瞬間に自動送信が有効になってしまう。
+        var handsFreeWithoutCompatibility = HandsFreeSendSettings.default
+        HandsFreeSendOnboardingActivation.apply(
+            enabled: true,
+            externalCompatibilityEnabled: false,
+            to: &handsFreeWithoutCompatibility
+        )
+        expect(
+            handsFreeWithoutCompatibility.enabled
+                && !handsFreeWithoutCompatibility.allowExternalAutoSend,
+            "the onboarding checkbox never leaves external auto-send consented while compatibility input is off"
+        )
+
+        // codexの探索候補は、子プロセスへ渡すPATHの組み立てと共有している
+        // （AGENTS.mdの退行禁止事項）。旧実装が持っていた3つの既知パスが、この順序で
+        // 先頭側に残っていること、候補がすべて末尾に /codex を付けた形で使われることを固定する。
+        let candidateDirectories = CodexBinaryLocations.allCandidateDirectories()
+        let home = NSHomeDirectory()
+        let legacyKnownDirectories = [
+            home + "/.npm-global/bin",
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+        ]
+        let legacyIndexes = legacyKnownDirectories.map { candidateDirectories.firstIndex(of: $0) }
+        expect(
+            legacyIndexes.allSatisfy { $0 != nil }
+                && legacyIndexes.compactMap { $0 } == legacyIndexes.compactMap { $0 }.sorted()
+                && candidateDirectories.first == legacyKnownDirectories[0],
+            "the codex search keeps the three originally known directories, in their original order"
+        )
+        expect(
+            CodexBinaryLocations.codexCandidates()
+                == CodexBinaryLocations.toolDirectories().map { $0 + "/codex" }
+                && Set(CodexBinaryLocations.toolDirectories()).isSubset(of: Set(candidateDirectories)),
+            "codex candidates are the existing tool directories with the binary name appended"
+        )
+        expect(
+            !HandsFreeSendSettings.default.enabled
+                && !HandsFreeSendSettings.default.allowExternalAutoSend,
+            "hands-free send and its external auto-send stay off on a fresh install"
         )
 
         // 保存物は本人以外が読めない権限で作られること。umask既定(0644/0755)へ戻る退行を検出する。

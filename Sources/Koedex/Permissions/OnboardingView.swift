@@ -642,6 +642,9 @@ struct OnboardingView: View {
             if handsFreeSendOnboardingIsAvailable {
                 Divider()
                 Toggle(uiText("ハンズフリー送信モードを有効にする"), isOn: handsFreeSendEnabledBinding)
+                Text(uiText("チェックを付けると、互換入力モードがONの場合に限り、設定画面の「外部アプリでも自動送信する」も同時にONになります。ブラウザやチャットアプリでも自動送信されるようになるため、不要な場合は設定画面でOFFにできます。"))
+                    .font(uiMetrics.font(.caption))
+                    .foregroundStyle(.secondary)
                 Text(uiFormat(
                     "%@ で開始し、発話の最後に「%@」と言うか、もう一度 %@ を押すと録音を終了します。本文を安全に挿入でき、送信が許可されている場合だけ、設定した送信キー（%@）を自動送信します。送信できた後は取り消せません。送信キー、カスタムフレーズ、外部アプリでの自動送信は設定で変更できます。",
                     hotkeyName(settingsStore.settings.handsFreeSendSettings.binding),
@@ -965,7 +968,7 @@ struct OnboardingView: View {
             }
 
             if isCapturingThisTarget {
-                Text(uiText("キーを入力してください。すべてのキーを離すと候補を表示します。"))
+                Text(uiText("キーを入力してください。すべてのキーを離すと候補を表示します。Escで取消できます。"))
                     .font(uiMetrics.font(.caption))
                     .foregroundStyle(.secondary)
             }
@@ -1494,7 +1497,12 @@ struct OnboardingView: View {
         Binding(
             get: { settingsStore.settings.handsFreeSendSettings.enabled },
             set: { enabled in
-                settingsStore.settings.handsFreeSendSettings.enabled = enabled
+                HandsFreeSendOnboardingActivation.apply(
+                    enabled: enabled,
+                    externalCompatibilityEnabled: settingsStore.settings
+                        .externalAppCompatibilitySettings.enabled,
+                    to: &settingsStore.settings.handsFreeSendSettings
+                )
             }
         )
     }

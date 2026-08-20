@@ -56,7 +56,7 @@ verify_app() {
   [[ -n "$bundle_id" ]] || fail "CFBundleIdentifierを読み取れません: $app_path"
 
   case "$bundle_id" in
-    com.koedex.app|com.koedex.onboarding-debug|com.koedex.language-setup-debug) ;;
+    com.koedex.app|com.koedex.onboarding-debug) ;;
     *) fail "想定外のbundle IDです: $bundle_id" ;;
   esac
 

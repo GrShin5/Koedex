@@ -1677,7 +1677,7 @@ struct SettingsView: View {
 
             if case .failed(let reason) = appDelegate.codexStatus {
                 Text(uiFormat(
-                    "現在Codexに接続できていません（%@）。必要な場合だけパスを指定し、保存するとCodexに再接続されます。",
+                    "Codexに接続できていません（%@）。［自動検出をやり直す］を押すか、［ファイルを選択…］でcodexの場所を指定してください。",
                     AppLocalizer.textOrLiteral(reason, language: uiLanguage)
                 ))
                     .font(uiMetrics.font(.caption))
@@ -1706,10 +1706,20 @@ struct SettingsView: View {
             .textFieldStyle(.roundedBorder)
             .frame(maxWidth: 520)
 
-        Button(uiText("保存")) {
-            saveCodexExecutablePath()
+        HStack(spacing: uiMetrics.layout(8)) {
+            Button(uiText("保存")) {
+                saveCodexExecutablePath()
+            }
+            .disabled(!hasCodexExecutablePathChanges)
+
+            Button(uiText("自動検出をやり直す")) {
+                redetectCodexExecutablePath()
+            }
+
+            Button(uiText("ファイルを選択…")) {
+                chooseCodexExecutablePath()
+            }
         }
-        .disabled(!hasCodexExecutablePathChanges)
     }
 
     private var modelCatalogNotice: String {
@@ -2062,7 +2072,9 @@ struct SettingsView: View {
 
     private var codexExecutablePathHelp: some View {
         VStack(alignment: .leading, spacing: uiMetrics.layout(6)) {
-            Text(uiText("通常は空欄のままで問題ありません。メニューバーに「Codex接続エラー」が出る場合だけ、ターミナルで"))
+            Text(uiText("通常は空欄のままで問題ありません。空欄のときは、npm・nvm・fnm・Volta・Homebrew などの標準的な場所と、ログインシェルのPATHから自動で探します。"))
+            Text(uiText("接続できていない場合は、まず［自動検出をやり直す］を押してください。それでも見つからないときは［ファイルを選択…］でcodex実行ファイルを直接指定できます。"))
+            Text(uiText("ターミナルを使う場合は"))
             inlineCode("command -v codex")
             Text(uiText("を実行し、表示されたパス（例:"))
             inlineCode("~/.npm-global/bin/codex")
@@ -3037,6 +3049,35 @@ struct SettingsView: View {
         store.settings.codexExecutablePath = codexExecutablePathDraft
         store.flushPendingSave()
         appDelegate.retryCodexConnection()
+    }
+
+    /// 入力欄を空にして保存し直し、既知の場所とログインシェルからの自動探索をやり直させる。
+    private func redetectCodexExecutablePath() {
+        codexExecutablePathDraft = ""
+        saveCodexExecutablePath()
+    }
+
+    /// ターミナルを一切使わずにcodexの場所を指定できるようにする。
+    private func chooseCodexExecutablePath() {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.showsHiddenFiles = true
+        panel.message = uiText("codex実行ファイルを選択してください")
+        panel.prompt = uiText("選択")
+
+        let handler: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let url = panel.url else { return }
+            codexExecutablePathDraft = url.path
+            saveCodexExecutablePath()
+        }
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow ?? NSApp.windows.first(where: { $0.isVisible }) {
+            panel.beginSheetModal(for: window, completionHandler: handler)
+        } else {
+            panel.begin(completionHandler: handler)
+        }
     }
 
     private func copyToPasteboard(_ text: String) {

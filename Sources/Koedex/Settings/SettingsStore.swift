@@ -107,6 +107,15 @@ struct KoedexSettings: Codable, Equatable {
         handsFreeSendSettings: .default
     )
 
+    /// 設定ファイルが存在するのに読めなかった時に使う一時的な状態。
+    /// ファイルへは書き戻さないが、同意が要る機能まで新規インストール向けの既定へ
+    /// 引き上げてしまうと、同意していない外部アプリ操作がその場で有効になる。
+    static let safeFallback: KoedexSettings = {
+        var settings = KoedexSettings.default
+        settings.externalAppCompatibilitySettings = .legacyDefault
+        return settings
+    }()
+
     init(
         customInstruction: String,
         cleanupEnabled: Bool,
@@ -214,10 +223,12 @@ struct KoedexSettings: Codable, Equatable {
             try container.decodeIfPresent(String.self, forKey: .preferredMicrophoneUID) ?? ""
         )
         aiCommandSettings = try container.decodeIfPresent(AICommandSettings.self, forKey: .aiCommandSettings) ?? .default
+        // 設定ファイルが存在する＝既存ユーザーなので、セクションが欠けていても
+        // 新規インストール用の既定（互換入力ON）は適用しない。
         var decodedExternalAppCompatibilitySettings = try container.decodeIfPresent(
             ExternalAppCompatibilitySettings.self,
             forKey: .externalAppCompatibilitySettings
-        ) ?? .default
+        ) ?? .legacyDefault
         // v22まで公開UIから有効化できた一時貼り付け経路は、v23でサポート専用へ移す。
         // 通常の互換入力・AI置換の同意は保持し、この追加経路だけを一度OFFへ戻す。
         if decodedSchemaVersion <= 22 {
@@ -330,7 +341,19 @@ struct ExternalAppCompatibilitySettings: Codable, Equatable {
     /// 通常の互換入力はUnicodeなので、この値がfalseでもclipboardは変更しない。
     var allowScopedClipboardFallback: Bool
 
+    /// 新規インストール用。ONでないと挿入できない外部アプリが多く、
+    /// 何も設定していないユーザーが「入力されない」と受け取ってしまうため、既定でONにする。
+    /// サポート専用の一時貼り付け経路（allowScopedClipboardFallback）だけはOFFのままにする。
     static let `default` = ExternalAppCompatibilitySettings(
+        enabled: true,
+        autoReplaceAICommandSelection: true,
+        allowScopedClipboardFallback: false
+    )
+
+    /// 既存ユーザー用。保存済みのsettings.jsonにこのセクション自体が無い場合に使う。
+    /// 新しい既定値が既存の同意状態を勝手に書き換えないよう、旧既定値のままにしておく。
+    /// LanguagePreferences.legacyDefaultと同じ考え方。
+    static let legacyDefault = ExternalAppCompatibilitySettings(
         enabled: false,
         autoReplaceAICommandSelection: false,
         allowScopedClipboardFallback: false
@@ -637,7 +660,9 @@ final class SettingsStore: ObservableObject {
         guard let data = try? Data(contentsOf: fileURL),
               let loaded = try? JSONDecoder().decode(KoedexSettings.self, from: data) else {
             // 壊れた既存設定をdefaultで上書きしない。UIはloadStatusを見て復旧を案内できる。
-            self.settings = .default
+            // ファイルがある＝既存ユーザーなので、同意が要る設定は新規インストール向けの
+            // 既定へ引き上げない（safeFallback）。書き込みも止めるが、この間の**挙動**も守る。
+            self.settings = .safeFallback
             self.loadStatus = .failedToDecode
             self.writesEnabled = false
             AppLog.shared.error("[SettingsStore] 設定ファイルのデコードに失敗（既存設定は保持）")

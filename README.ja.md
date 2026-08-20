@@ -55,7 +55,40 @@ Koedexは独立したコミュニティプロジェクトです。**OpenAIと提
   読み戻されます。新しい既定値が効くのは、設定が保存されていない場合だけです。
   保持期間は設定画面でモードごとに変更でき、「無期限」も選べます。
 
-## インストール／ソースからのビルド
+## インストール
+
+所要時間: 15〜40分（大半はダウンロードとビルドの待ち時間）
+あなたの操作が必要な場面は3回だけです。
+
+1. 開発ツールの更新時にMacのパスワードを入力（すでに最新なら不要）
+2. 証明書を信頼する認証ダイアログの承認（Touch IDまたはパスワード、1回）
+3. アプリ起動後の権限許可3つ（マイク・音声認識・アクセシビリティ）
+
+### A. エージェントに任せる（ターミナル操作がほぼ不要）
+
+[docs/agent-install-prompt.md](docs/agent-install-prompt.md) のプロンプトをコピーして、
+Claude CodeまたはCodex CLIに貼り付けるだけで導入できます。
+
+### B. 自分でコマンドを実行する
+
+#### 作業フォルダを選ぶ
+
+デスクトップと書類フォルダは、iCloud Driveの「デスクトップと書類フォルダ」同期の対象になっている
+ことが多く、同期が付ける拡張属性があるとmacOSがコード署名を拒否します。`scripts/make_app.sh`は
+署名の直前に、自身が作った組み立て用の複製から拡張属性を取り除くため、多くの場合はそのまま
+ビルドできます。確実を期すなら`~/Downloads`や`~/Developer`など、同期対象外の場所を使ってください。
+
+署名の段階で`resource fork, Finder information, or similar detritus not allowed`が出た場合は、
+同期対象外の場所へcloneし直してください。**移動（`mv`）では拡張属性がそのまま残るため解決しません。**
+
+#### 事前チェック
+
+ビルド前に以下を実行すると、必要な条件をまとめて確認できます。不足があれば、やるべきことが
+一覧で表示されます。
+
+```bash
+bash scripts/preflight.sh
+```
 
 ```bash
 # このリポジトリのクローンから実行します
@@ -67,16 +100,35 @@ swift build
 ./scripts/make_app.sh debug
 ```
 
-### 今後の配布について
+#### Swiftのバージョンが足りない場合
 
-現在、配布用のリリースは提供していません。配布物を準備する場合は、この公式リポジトリの対応する
+Command Line Toolsが入っていても、バージョンが古い場合があります。以下で更新してください。
+
+```bash
+softwareupdate --list
+sudo softwareupdate --install "<--list の出力からコピーしたラベル>"
+```
+
+ラベル名は版ごとに変わるため、固定の文字列ではなく`--list`の出力からコピーしてください。
+ダウンロードサイズは約900MB、所要時間は10〜30分で、**管理者パスワードが必要です**。
+
+#### 今後の配布について
+
+現在、ビルド済みの配布物は提供していません。配布物を準備する場合は、この公式リポジトリの対応する
 release tagから作ったcleanなcloneを使います。別の作業用コピーから作った`.app`は配布しません。
 
-### コード署名証明書（初回のみ）
+#### コード署名証明書（初回のみ）
 
 `scripts/make_app.sh` は ad-hoc署名の`.app`を作成しません。ad-hoc署名はビルドごとにアイデンティティが
 変わり、署名が変わるたびにmacOSがアクセシビリティ／マイク／音声認識の権限を無効化してしまうためです。
 代わりに、安定したローカル自己署名証明書「Koedex Dev」が必要です。
+
+証明書の作成にはOpenSSL 3が必要です。macOS標準の`openssl`はLibreSSLであり、そのままでは動作しません。
+スクリプトは自動でOpenSSL 3を探しますが、見つからない場合は次でインストールしてください。
+
+```bash
+brew install openssl@3
+```
 
 初回ビルド前に、以下で作成します。
 
@@ -99,6 +151,14 @@ security add-trusted-cert -k "$HOME/Library/Keychains/login.keychain-db" \
 （`security find-identity -v -p codesigning` に表示される）まで、`.app`の組み立てを行いません。
 表示されるようになったら、`./scripts/make_app.sh debug`（または`release`）を再実行してください。
 
+#### ビルド成功の判定基準
+
+エージェントに委任した場合の誤判定を防ぐため、ビルドが成功したかどうかは以下すべてで判定してください。
+
+1. スクリプトの終了コードが0
+2. `dist/Koedex.app`が存在する
+3. `codesign --verify --deep --strict dist/Koedex.app`が成功する
+
 ## 3つの権限付与手順
 
 Koedexは、macOSの3つのプライバシー権限を必要とします。`dist/Koedex.app`を`/Applications`などへ
@@ -120,7 +180,7 @@ Koedexは、macOSの3つのプライバシー権限を必要とします。`dist
 
 ## 使い方
 
-- 任意のアプリでカーソルをテキスト入力欄に置いた状態で、**fnキー**を押し続けると録音が始まります。
+- 任意のアプリでカーソルをテキスト入力欄に置いた状態で、**fnキー**を押すと録音が始まります。
   もう一度**fnキー**を押すと停止し、文字起こし→AI整形→カーソル位置への貼り付け、が自動で行われます。
 - 処理中は、画面下部の小さなフローティングHUDに「録音中」「整形中」などの状態が表示されます。
 - メニューバーアイコンから「設定…」を開くと、AI整形のオン/オフ、カスタムインストラクション、履歴、
@@ -180,11 +240,10 @@ xattr -dr com.apple.quarantine /Applications/Koedex.app
 # ビルド
 swift build
 
-# .appバンドルの組み立て — 4つのターゲットに対応しています
+# .appバンドルの組み立て — 3つのターゲットに対応しています
 ./scripts/make_app.sh debug                  # dist/Koedex.app、debugビルド
 ./scripts/make_app.sh release                # dist/Koedex.app、releaseビルド
 ./scripts/make_app.sh onboarding-debug        # dist/Koedex Debug.app、初回セットアップ確認用の隔離環境
-./scripts/make_app.sh language-setup-debug    # dist/Koedex Language Setup Debug.app、言語セットアップ確認用の隔離環境
 
 # 回帰テストスイート — ネットワーク通信もcodex app-server呼び出しも行いません
 .build/debug/Koedex --test-regressions
@@ -216,8 +275,8 @@ swift build
 .build/debug/Koedex --test-cleanup-repeat 3 --test-model <slug> --test-effort <effort>
 ```
 
-`onboarding-debug`と`language-setup-debug`は、それぞれ独自の
-`~/Library/Application Support/Koedex Debug/`相当のデータ領域を使うため、普段使いのKoedexの設定・
+`onboarding-debug`は独自の
+`~/Library/Application Support/Koedex Debug/`データ領域を使うため、普段使いのKoedexの設定・
 履歴・辞書・Codex接続に触れずに初回フローを試せます。
 
 一部のクリップボード（pasteboard）関連の回帰テストは、実際のpasteboardサーバーへの接続を必要とします。
@@ -233,7 +292,7 @@ Koedexは`--support-scoped-clipboard-fallback enable|disable|status`も受け付
 
 このフラグは設定の互換入力モードに従属します。互換入力がOFFの間は`enable`できず、互換入力をOFFに
 するとこのフラグも解除されます。**互換入力をONに戻してもこのフラグは復活しません**。もう一度
-`enable`を実行してください。`onboarding-debug`と`language-setup-debug`のビルドでも拒否されます。
+`enable`を実行してください。`onboarding-debug`のビルドでも拒否されます。
 
 実行前にKoedexを終了してください。起動中はコマンド側が拒否します（アプリとコマンドが同時に
 設定ファイルを持たないようにするためです）。

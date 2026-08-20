@@ -25,11 +25,30 @@ enum TextInjectorResult {
     case failed(Error)
 }
 
+/// 別ウィンドウへ退避した理由のうち、利用者へ伝える価値があるものだけを表す。
+/// 挿入の成否判定には使わない。文言の選択だけに使う。
+enum NormalTextInsertionFallbackReason: Equatable {
+    /// 一括Unicodeイベントの上限を超えていて、一度に送れなかった。
+    case payloadTooLong
+}
+
 /// 通常モードの挿入結果に、擬似送信の可否だけを表す証跡を添える。
 /// 既存の`TextInjectorResult`の意味や履歴判定は変更しない。
 struct NormalTextInsertionOutcome {
     let result: TextInjectorResult
     let sendEligibility: SendAfterInsertEligibility
+    /// 退避した理由。既定の`nil`は「理由を区別しない従来どおりの退避」を意味する。
+    let fallbackReason: NormalTextInsertionFallbackReason?
+
+    init(
+        result: TextInjectorResult,
+        sendEligibility: SendAfterInsertEligibility,
+        fallbackReason: NormalTextInsertionFallbackReason? = nil
+    ) {
+        self.result = result
+        self.sendEligibility = sendEligibility
+        self.fallbackReason = fallbackReason
+    }
 }
 
 enum SafeTextInjectionResult {
@@ -41,6 +60,9 @@ enum SafeTextInjectionResult {
     case clipboardVariantPasteMayHaveLostClipboard
     case externalCompatibilityDisabled
     case manualFallbackRequired
+    /// 本文が一括Unicodeイベントの上限を超えていて直接入力できなかった。
+    /// `.manualFallbackRequired`と分けるのは、利用者へ理由を伝えるため。
+    case payloadTooLongForDirectInsertion
     case insertionUnconfirmed
     case nonEditable
     case selectionNotCollapsed
@@ -393,7 +415,7 @@ final class TextInjector {
             allowScopedClipboardFallback: false,
             allowUnverifiedMultilineText: true
         )
-        return Self.mapSafeResult(outcome.result)
+        return Self.mapSafeResult(outcome)
     }
 
     /// `「AIに指示」モード`の出力先は、開始時の選択sourceではなく録音停止時に
@@ -527,7 +549,7 @@ final class TextInjector {
                     : false,
                 allowUnverifiedMultilineText: true
             )
-            return Self.mapSafeResult(outcome.result)
+            return Self.mapSafeResult(outcome)
         case .scopedClipboardPaste, .unicode:
             guard let target else { return .targetChanged }
             if operation == .explicitTargetInsertion,
@@ -559,7 +581,7 @@ final class TextInjector {
                 allowScopedClipboardFallback: transport == .scopedClipboardPaste,
                 allowUnverifiedMultilineText: true
             )
-            return Self.mapSafeResult(outcome.result)
+            return Self.mapSafeResult(outcome)
         case .clipboardVariantPaste:
             guard let target else { return .targetChanged }
             switch scopedClipboardTextTransport.submit(text, to: target) {
@@ -754,9 +776,30 @@ final class TextInjector {
                 result: .failed(TextInjectorError.targetChangedBeforePaste),
                 sendEligibility: .notEligible
             )
-        case .payloadTooLong, .eventCreationFailed:
+        case .payloadTooLong:
+            // 途中まで入力する分割送出はしない設計のため、ここで退避する。
+            // ただし理由は保ち、呼び出し側が利用者へ伝えられるようにする。
+            // 空本文も同じ`.payloadTooLong`で返るため、長さが原因の時だけ理由を付ける。
+            // 空本文に「長すぎる」と説明すると、利用者を誤った対処へ誘導する。
+            return NormalTextInsertionOutcome(
+                result: .manualFallbackRequired,
+                sendEligibility: .notEligible,
+                fallbackReason: SyntheticUnicodeTextTransport
+                    .exceedsMaximumUTF16Length(text.utf16.count) ? .payloadTooLong : nil
+            )
+        case .eventCreationFailed:
             return NormalTextInsertionOutcome(result: .manualFallbackRequired, sendEligibility: .notEligible)
         }
+    }
+
+    /// 退避理由を保ったまま写す。`.payloadTooLong`だけは専用の値へ写し、
+    /// 「長すぎて入らなかった」ことが呼び出し側で分かるようにする。
+    static func mapSafeResult(_ outcome: NormalTextInsertionOutcome) -> SafeTextInjectionResult {
+        if case .manualFallbackRequired = outcome.result,
+           outcome.fallbackReason == .payloadTooLong {
+            return .payloadTooLongForDirectInsertion
+        }
+        return mapSafeResult(outcome.result)
     }
 
     // 回帰テストがTextInjectorのインスタンスなしで写像を直接検証できるよう、

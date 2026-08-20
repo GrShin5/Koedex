@@ -77,6 +77,40 @@ if [[ "$NON_INTERACTIVE" -eq 1 ]]; then
   exit 0
 fi
 
+# macOS標準の/usr/bin/opensslはLibreSSLで、-legacy等のOpenSSL 3専用オプションを解さない。
+# 事前に実体を判定し、OpenSSL 3でなければ代替パスを探す。見つからなければ、40行以上の
+# usageダンプをユーザーに見せる前に、ここで日本語メッセージを出して停止する。
+is_openssl3() {
+  "$1" version 2>/dev/null | grep -q "OpenSSL 3"
+}
+
+find_openssl3() {
+  local candidate brew_prefix
+  brew_prefix="$(brew --prefix openssl@3 2>/dev/null || true)"
+  for candidate in \
+    "${brew_prefix:+$brew_prefix/bin/openssl}" \
+    "/opt/homebrew/opt/openssl@3/bin/openssl" \
+    "/usr/local/opt/openssl@3/bin/openssl"; do
+    [[ -n "$candidate" && -x "$candidate" ]] || continue
+    printf '%s\n' "$candidate"
+    return 0
+  done
+  return 1
+}
+
+OPENSSL_BIN="openssl"
+if ! is_openssl3 "$OPENSSL_BIN"; then
+  if OPENSSL3_PATH="$(find_openssl3)"; then
+    OPENSSL_BIN="$OPENSSL3_PATH"
+  else
+    echo "=== 失敗: OpenSSL 3が見つかりません ===" >&2
+    echo "macOS標準のopensslはLibreSSLで、証明書作成に必要な -legacy オプションを解しません。" >&2
+    echo "以下を実行してOpenSSL 3を導入してから再実行してください:" >&2
+    echo "  brew install openssl@3" >&2
+    exit 1
+  fi
+fi
+
 # 自己署名コード署名証明書を自動生成する。
 # security create-keychainは使わず、既定のログインkeychainへ証明書を追加する形を取る。
 # opensslで自己署名証明書＋秘密鍵を生成し、PKCS#12として一時的にエクスポートしてから
@@ -91,18 +125,24 @@ P12_PATH="$WORKDIR/koedex_dev.p12"
 # This passphrase protects only the short-lived PKCS#12 file in WORKDIR.  It is
 # generated per run, never printed, and becomes unusable when the trap removes
 # that directory.
-P12_PASSWORD="$(openssl rand -hex 32)"
+P12_PASSWORD="$("$OPENSSL_BIN" rand -hex 32)"
 
 echo "=== 自己署名証明書を生成しています ==="
-openssl req -x509 -newkey rsa:2048 -keyout "$KEY_PATH" -out "$CERT_PATH" \
+REQ_LOG="$WORKDIR/openssl_req.log"
+if ! "$OPENSSL_BIN" req -x509 -newkey rsa:2048 -keyout "$KEY_PATH" -out "$CERT_PATH" \
   -days 3650 -nodes -subj "/CN=$CERT_NAME" \
   -addext "keyUsage=critical,digitalSignature" \
-  -addext "extendedKeyUsage=critical,codeSigning" >/dev/null 2>&1
+  -addext "extendedKeyUsage=critical,codeSigning" >"$REQ_LOG" 2>&1; then
+  echo "=== 失敗: 自己署名証明書の生成に失敗しました ===" >&2
+  cat "$REQ_LOG" >&2
+  exit 1
+fi
 
 # -legacy: OpenSSL 3.x はデフォルトでAES暗号化のPKCS#12を生成するが、macOSの
 # securityコマンド（SecKeychainItemImport）はこれを正しく復号できずMAC検証エラーになる
 # 場合がある。-legacyでRC2/3DES系の従来形式にすることでmacOS側と互換性を持たせる。
-P12_PASSWORD="$P12_PASSWORD" openssl pkcs12 -export -out "$P12_PATH" -inkey "$KEY_PATH" -in "$CERT_PATH" \
+# OPENSSL_BINはOpenSSL 3であることを確認済みのため、-legacyオプションが解釈される。
+P12_PASSWORD="$P12_PASSWORD" "$OPENSSL_BIN" pkcs12 -export -out "$P12_PATH" -inkey "$KEY_PATH" -in "$CERT_PATH" \
   -name "$CERT_NAME" -passout env:P12_PASSWORD -legacy
 
 echo "=== ログインkeychainへインポートしています ==="
@@ -117,28 +157,37 @@ fi
 
 # コード署名で使えるように、信頼設定に「常に信頼」を付与する（自己署名のため必要）。
 # 重要: `add-trusted-cert` はGUIの認証ダイアログ（Touch ID/パスワード入力）を要求する。
-# これは意図的なOSのセキュリティゲートであり、非対話シェルからは絶対に自動承認できない
-# （承認するまでプロセスは無期限にブロックする）。そのためtimeoutで打ち切り、
-# 承認されなかった場合は明確にその旨を案内する。
-TRUST_TIMEOUT_SECONDS=5
+# これは意図的なOSのセキュリティゲートであり、非対話シェルからは絶対に自動承認できない。
+# timeout/gtimeoutが使えればそれで打ち切るが、どちらも無い素のmacOS環境ではタイムアウトせず
+# 直接実行する（承認されるまでブロックするのは、導入作業中は正しい挙動のため）。
+# 打ち切りは「席を外した人を無限に待たない」ための保険であって、承認そのものを
+# 急かすためのものではない。Touch IDやパスワード入力に人間が要する時間より短くしない。
+TRUST_TIMEOUT_SECONDS=180
 if command -v timeout >/dev/null 2>&1; then
   TIMEOUT_CMD="timeout"
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="gtimeout"
 else
-  # BSD/macOS標準にはtimeoutが無いことがあるため簡易フォールバック。
   TIMEOUT_CMD=""
 fi
 
+echo ""
+echo "これから macOS の認証ダイアログが表示されます。Touch ID またはパスワードで承認してください。"
+echo "これは自己署名証明書をコード署名用として信頼させるための、macOS が要求する手順です。"
+
 TRUST_ADDED=0
+# `-r trustAsRoot` は自己署名ルート証明書向けの厳格な設定だが、macOSによっては
+# `SecTrustSettingsSetTrustSettings: parameters were not valid` エラーで拒否されることがある。
+# `-r trustAsRoot` を省略した通常のadd-trusted-certでも codeSigning EKU を持つ自己署名証明書は
+# `find-identity -p codesigning` に登録されるため、まずこちらを試す。
 if [[ -n "$TIMEOUT_CMD" ]]; then
-  # `-r trustAsRoot` は自己署名ルート証明書向けの厳格な設定だが、macOSによっては
-  # `SecTrustSettingsSetTrustSettings: parameters were not valid` エラーで拒否されることがある。
-  # `-r trustAsRoot` を省略した通常のadd-trusted-certでも codeSigning EKU を持つ自己署名証明書は
-  # `find-identity -p codesigning` に登録されるため、まずこちらを試す。
-  if $TIMEOUT_CMD "$TRUST_TIMEOUT_SECONDS" security add-trusted-cert -k "$HOME/Library/Keychains/login.keychain-db" "$CERT_PATH" 2>/dev/null; then
+  if $TIMEOUT_CMD "$TRUST_TIMEOUT_SECONDS" security add-trusted-cert -k "$HOME/Library/Keychains/login.keychain-db" "$CERT_PATH"; then
     TRUST_ADDED=1
   fi
 else
-  echo "注意: 'timeout'コマンドが無いため信頼設定の自動付与はスキップします（GUI承認ダイアログが必要なため）。" >&2
+  if security add-trusted-cert -k "$HOME/Library/Keychains/login.keychain-db" "$CERT_PATH"; then
+    TRUST_ADDED=1
+  fi
 fi
 
 NEW_HASH="$(existing_hash || true)"
@@ -158,7 +207,7 @@ PERSISTENT_CERT_PATH="$PERSISTENT_CERT_DIR/koedex_dev_cert.crt"
 security find-certificate -c "$CERT_NAME" -p "$HOME/Library/Keychains/login.keychain-db" > "$PERSISTENT_CERT_PATH" 2>/dev/null || \
   cp "$CERT_PATH" "$PERSISTENT_CERT_PATH"
 
-CERT_HASH="$(openssl x509 -in "$PERSISTENT_CERT_PATH" -noout -fingerprint -sha1 2>/dev/null | sed 's/^.*=//')"
+CERT_HASH="$("$OPENSSL_BIN" x509 -in "$PERSISTENT_CERT_PATH" -noout -fingerprint -sha1 2>/dev/null | sed 's/^.*=//')"
 echo "=== 証明書 \"$CERT_NAME\" はkeychainに作成されましたが、信頼設定（Trust）が未完了です ===" >&2
 echo "SHA-1 (証明書): ${CERT_HASH:-不明}" >&2
 echo "" >&2

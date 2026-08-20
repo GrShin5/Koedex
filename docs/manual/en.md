@@ -407,12 +407,14 @@ bug.
 | Step 6 | If you enable AI Command mode, you can't continue until you've confirmed the launch key and the stop key |
 
 > **About the screenshots in this chapter**
-> These screenshots were taken with a developer preview build, so that capturing them would
-> not overwrite any real settings. The **window title** at the top, and a **purple note**
-> explaining that the preview simulates permissions, differ from what you will see. Beyond
-> that, things like Step 3's permission button behavior, Step 8's finish button, and notes
-> about the developer build's own storage location are also specific to the preview build.
-> The order of items and the choices themselves are the same as on the real screen.
+> These were captured with the Debug app's device-test mode, so that capturing them would
+> not overwrite any real settings. A few things differ from what you will see: the **window
+> title** at the top reads "Koedex Debug", a **purple note** explains that the Debug app
+> uses its own permissions and storage, the storage paths shown name the Debug app's own
+> folder, and Step 8 ends with a button back to the Debug menu instead of finishing setup.
+> Step 1 appears in both languages because the display language has not been chosen yet —
+> that is what a real first run looks like too. The steps, the order of the items, and the
+> default values are the same as on the real screen.
 
 ### Step 1: Choose your language
 
@@ -440,7 +442,9 @@ replies Japanese too.
 
 This screen also notes that signing in to Codex CLI is required, that **the ChatGPT app
 cannot substitute for it**, and that on-device transcription still works even when Codex
-can't be reached.
+can't be reached. Scrolling down continues with more detail on connecting to Codex CLI.
+**You can finish setting up Codex CLI later — it doesn't have to be done before you
+complete onboarding.**
 
 ### Step 3: Three permissions
 
@@ -500,7 +504,7 @@ launch key.**
 | --- | --- | --- | --- |
 | Automatic recording stop | 3 min / 5 min (recommended) / 10 min | If you forget to stop while still talking, recording stops automatically after this time | Yes |
 | Standard-mode history retention | Do not save / 1 day / 30 days / 180 days / Unlimited | How many days of results stay in the [History tab](#9-history-tab) | Yes |
-| Enable Hands-free send mode | On / Off (optional) | Turning it on shows extra history settings on this same screen | Yes |
+| Enable Hands-free send mode | On / Off (optional) | Turning it on shows extra history settings on this same screen, and if Compatibility Input Mode is on, it also turns on "Also auto-send in external apps" in Settings. Unticking it turns that back off | Yes |
 
 > **Note**: "1 minute" only appears as a choice if your existing setting for automatic stop
 > is already 60 seconds.
@@ -798,7 +802,7 @@ This section has two toggles.
 | Item | Detail |
 | --- | --- |
 | What it's for | Uses an alternate input method for apps and web pages that don't accept direct text insertion |
-| Default | Off |
+| Default | On, on a new install. If you were already using Koedex, your existing setting is kept unchanged |
 | What turning it on does | Allows capturing selected text in external apps, and direct input via a virtual-input method that doesn't touch the clipboard |
 | Note | In some fields, Koedex may not be able to confirm the text was actually inserted |
 
@@ -807,7 +811,7 @@ This section has two toggles.
 | Item | Detail |
 | --- | --- |
 | What it's for | Puts AI Command mode's result directly into the text field instead of a separate window |
-| Default | Off |
+| Default | On, on a new install. If you were already using Koedex, your existing setting is kept unchanged |
 | Note | **Unavailable while Compatibility Input Mode is off.** Turning Compatibility Input Mode back off effectively disables this too |
 
 **To put an AI answer directly into the text field, both of the following must be on both
@@ -823,6 +827,20 @@ and paste it with `⌘V`. Turning either one off mid-recording has the same effe
 
 Note that this is about putting an **AI answer** into a text field. Replacing text you
 selected and asked to be rewritten works through a different mechanism.
+
+**If the AI's answer is too long, it may also be shown in a separate window instead of
+being inserted directly.** There's a safety limit on how much text can be sent at once;
+results over that limit are shown in a separate window instead of being inserted partway
+and broken. In that case you'll see: "The result was too long to type directly into this
+input field. Copy the text below and paste it." Copy it from there and paste it. Asking
+again in smaller pieces can get the result inserted directly.
+
+The same limit applies to the replacement you get when you select text and ask for a
+rewrite. The one exception is a rewrite in [clipboard mode](#clipboard-mode): it is
+pasted with `⌘V`, so the limit doesn't apply.
+
+With Compatibility Input Mode on, the same notification can also appear for standard-mode
+voice input, if what you say is long enough to hit the same limit.
 
 ### AI assist
 
@@ -1013,7 +1031,7 @@ web whenever it decides that's needed.
 | Spoken trigger phrase | Preset | Preset / Custom |
 | Custom phrase | Empty | 4–20 characters, one line, no quotation marks |
 | Send key | `Enter` | Enter / ⌘Enter / ⌃Enter |
-| Also auto-send in external apps | Off | Turning it on shows a confirmation dialog |
+| Also auto-send in external apps | Off | Turning it on shows a confirmation dialog. It is also turned on for you if you tick "Enable Hands-free send mode" during first-run setup while Compatibility Input Mode is on |
 
 | Note | Detail |
 | --- | --- |
@@ -1170,7 +1188,7 @@ jargon. Choose "Personal dictionary" in the Settings sidebar.
 | --- | --- |
 | Term / spelling | The spelling you want typed |
 | Readings / how it sounds | What triggers it. **You can register multiple** |
-| Notes | A note for your own reference |
+| Notes | This is context for this term only. Put overall style and output rules in Custom instruction |
 | Enabled / disabled | Lets you temporarily stop using an entry |
 
 ### How the dictionary actually works (a common misunderstanding)
@@ -1188,6 +1206,12 @@ This design has three consequences:
 | **In Standard mode and Hands-free send mode, it does nothing if AI assist is off** | Since the dictionary is passed as an instruction to AI, it has no effect when AI isn't used. **In AI Command mode, the dictionary is used regardless of the AI assist setting** |
 | It considers context | Because it isn't a plain find-and-replace, it won't apply in completely unrelated contexts |
 
+> **Notes are also passed to AI.** When you use cleanup in Standard mode, Hands-free send
+> mode, or optimizing custom instructions, the full text of an entry's notes is also passed
+> to `codex` as part of the prompt (it leaves your Mac). **It is not passed in AI Command
+> mode** (only the term/spelling and readings are). This isn't a place for personal notes —
+> only write things you're fine with leaving your Mac.
+
 If the dictionary doesn't seem to be working, first check whether "AI assist" is on in
 Settings, and whether that specific entry is "Enabled."
 
@@ -1204,7 +1228,11 @@ You can export and import the whole dictionary at once.
 | Import encoding | Automatically detects UTF-8 / UTF-16 / Shift_JIS |
 | Values accepted in the "enabled" column | TRUE / FALSE (yes/no, 1/0, on/off, and similar values are also accepted; a blank cell is treated as enabled) |
 
-#### Limits
+#### Limits on import (CSV)
+
+These limits apply only to CSV import. There's no character limit when you type directly
+into Settings. Note, though, that a note longer than 500 characters is rejected if you
+export the dictionary and import it back.
 
 | Item | Limit |
 | --- | --- |
@@ -1400,6 +1428,7 @@ See [Chapter 7: Common to all modes: cancel with Esc](#common-to-all-modes-cance
 | --- | --- | --- |
 | No text is typed at all | Koedex couldn't safely confirm the target field | Turn on [Compatibility Input Mode](#compatibility-input-mode) in Settings and try again |
 | The result shows in a separate window | Koedex couldn't confirm the state of the text field | Copy from the window and paste it, or turn on Compatibility Input Mode |
+| Only long results show in a separate window | The result went over the limit on how much text can be sent at once | Copy and paste it, or try dictating it again in smaller pieces |
 | Only the clipboard has it | Koedex couldn't confirm the target field at all | Paste it with `⌘V` |
 
 Some apps and web pages don't report their text-field state through macOS's standard
@@ -1577,6 +1606,13 @@ window instead. Copy it from the window and paste it, or turn on
 [Compatibility Input Mode](#compatibility-input-mode) and try again. **If you want AI
 Command mode results inserted directly, both Compatibility Input Mode and "Insert AI
 Command mode results directly" need to be on before you start recording.**
+
+#### The result was too long to type directly into this input field. Copy the text below and paste it.
+
+There's a safety limit on how much text can be sent at once. If a result goes over that
+limit, it's shown in a separate window instead of being inserted partway and broken. Copy
+it from the window and paste it, or try dictating again in smaller pieces. This can happen
+both with standard voice input and with AI Command mode.
 
 #### This output will not be retried automatically. Copy and paste it, or turn on Compatibility Input Mode and dictate it again.
 
@@ -1894,11 +1930,13 @@ This deletes:
 | Custom instructions |
 | Logs |
 
-> **Note**: If you've ever built with `onboarding-debug` or `language-setup-debug` from
-> [Appendix B](#18-appendix-b-build-from-source-yourself), you'll also have separate folders
-> named `Koedex Debug/` and `Koedex Language Setup Debug/` inside
-> `~/Library/Application Support/`. Move those to the Trash the same way if you want to
-> remove them too.
+> **Note**: If you've ever built with `onboarding-debug` from
+> [Appendix B](#18-appendix-b-build-from-source-yourself), you'll also have a separate folder
+> named `Koedex Debug/` inside
+> `~/Library/Application Support/`. Move it to the Trash the same way if you want to
+> remove it too. If you ever built with `language-setup-debug`, a
+> `Koedex Language Setup Debug/` folder is still there as well — that build has been
+> retired.
 
 ### Step 4: Remove permission entries (optional)
 
@@ -2150,7 +2188,6 @@ On success, this creates `dist/Koedex.app`.
 | `release` | The standard build for distribution |
 | `debug` | A build for development |
 | `onboarding-debug` | For testing first-time setup (uses an isolated data location) |
-| `language-setup-debug` | For testing language setup (uses an isolated data location) |
 
 If you only want the executable, this also works:
 
@@ -2184,8 +2221,8 @@ Once it launches, continue with [6. First-time setup](#6-first-time-setup).
 
 | Item | Detail |
 | --- | --- |
-| Release covered | v0.1.2 |
-| App version covered | 0.1.2 |
+| Release covered | v0.1.3 |
+| App version covered | 0.1.3 |
 | Manual language | English |
 
 This manual was written against the source code in the release above. Newer versions may

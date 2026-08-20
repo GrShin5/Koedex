@@ -27,15 +27,26 @@ while [[ "$#" -gt 0 ]]; do
       shift 2
       ;;
     *)
-      echo "Usage: $0 [debug|release|onboarding-debug|language-setup-debug] [--previous-app /path/to/Koedex.app]" >&2
+      echo "Usage: $0 [debug|release|onboarding-debug] [--previous-app /path/to/Koedex.app]" >&2
       exit 1
       ;;
   esac
 done
 
-if [[ "$CONFIGURATION" != "debug" && "$CONFIGURATION" != "release" && "$CONFIGURATION" != "onboarding-debug" && "$CONFIGURATION" != "language-setup-debug" ]]; then
-  echo "Usage: $0 [debug|release|onboarding-debug|language-setup-debug] [--previous-app /path/to/Koedex.app]" >&2
+if [[ "$CONFIGURATION" != "debug" && "$CONFIGURATION" != "release" && "$CONFIGURATION" != "onboarding-debug" ]]; then
+  echo "Usage: $0 [debug|release|onboarding-debug] [--previous-app /path/to/Koedex.app]" >&2
   exit 1
+fi
+
+# 前提条件をまとめて検査してから始める。90秒のコンパイルを終えた後に、
+# 事前に分かる理由で失敗させないための入口。
+if [[ -f "$ROOT_DIR/scripts/preflight.sh" ]]; then
+  if ! PREFLIGHT_OUTPUT="$(bash "$ROOT_DIR/scripts/preflight.sh" --quiet 2>&1)"; then
+    echo "$PREFLIGHT_OUTPUT" >&2
+    echo "=== 失敗: 前提条件が満たされていません ===" >&2
+    exit 2
+  fi
+  [[ -n "$PREFLIGHT_OUTPUT" ]] && echo "$PREFLIGHT_OUTPUT"
 fi
 
 CERT_NAME="Koedex Dev"
@@ -54,7 +65,8 @@ if [[ "${#MATCHING_IDENTITIES[@]}" -gt 1 ]]; then
 権限を維持するには、毎回同じ証明書を使う必要があります。不要な同名証明書を
 キーチェーンから整理して1つにしてから、もう一度実行してください。
 EOF
-  exit 1
+  echo "=== 失敗: 前提条件が満たされていません ===" >&2
+  exit 2
 fi
 
 SIGN_IDENTITY="${MATCHING_IDENTITIES[0]:-}"
@@ -74,7 +86,8 @@ ad-hoc署名（codesign --sign -）ではKoedex.appを作成しません。
 証明書がkeychainにあるのに使えない場合は、次も参照してください:
   bash scripts/make_signing_cert.sh --interactive-help
 EOF
-  exit 1
+  echo "=== 失敗: 前提条件が満たされていません ===" >&2
+  exit 2
 fi
 
 IDENTITY_STATE_FILE="$ROOT_DIR/dist/.koedex-signing-identity"
@@ -83,7 +96,8 @@ if [[ -f "$IDENTITY_STATE_FILE" ]]; then
   PINNED_SIGN_IDENTITY="$(tr -d '[:space:]' < "$IDENTITY_STATE_FILE")"
   if [[ ! "$PINNED_SIGN_IDENTITY" =~ ^[[:xdigit:]]{40}$ ]]; then
     echo "エラー: 署名IDの固定情報が壊れています: $IDENTITY_STATE_FILE" >&2
-    exit 1
+    echo "=== 失敗: 前提条件が満たされていません ===" >&2
+    exit 2
   fi
   PINNED_SIGN_IDENTITY="$(printf '%s' "$PINNED_SIGN_IDENTITY" | tr '[:lower:]' '[:upper:]')"
   if [[ "$SIGN_IDENTITY" != "$PINNED_SIGN_IDENTITY" ]]; then
@@ -93,7 +107,8 @@ if [[ -f "$IDENTITY_STATE_FILE" ]]; then
 固定済みの証明書を使用するか、署名を変更する理由と既存利用者への権限再許可の
 影響を確認してから、明示的な署名移行手順を行ってください。
 EOF
-    exit 1
+    echo "=== 失敗: 署名または配置に失敗しました ===" >&2
+    exit 4
   fi
 fi
 
@@ -101,11 +116,19 @@ echo "=== 署名: 安定した \"$CERT_NAME\" 証明書を使用 ==="
 
 if [[ "$CONFIGURATION" == "release" ]]; then
   echo "=== swift build (-c release) ==="
-  swift build -c release
+  if ! swift build -c release; then
+    echo "=== 失敗: swift buildに失敗しました ===" >&2
+    echo "上記のビルドエラーを確認し、修正してから再実行してください。" >&2
+    exit 3
+  fi
   BIN_PATH=".build/release/Koedex"
 else
   echo "=== swift build (debug) ==="
-  swift build
+  if ! swift build; then
+    echo "=== 失敗: swift buildに失敗しました ===" >&2
+    echo "上記のビルドエラーを確認し、修正してから再実行してください。" >&2
+    exit 3
+  fi
   BIN_PATH=".build/debug/Koedex"
 fi
 
@@ -113,12 +136,6 @@ if [[ "$CONFIGURATION" == "onboarding-debug" ]]; then
   APP_NAME="Koedex Debug.app"
   APP_DISPLAY_NAME="Koedex Debug"
   BUNDLE_IDENTIFIER="com.koedex.onboarding-debug"
-  LS_UI_ELEMENT="<false/>"
-  ICON_PLIST_ENTRY=""
-elif [[ "$CONFIGURATION" == "language-setup-debug" ]]; then
-  APP_NAME="Koedex Language Setup Debug.app"
-  APP_DISPLAY_NAME="Koedex Language Setup Debug"
-  BUNDLE_IDENTIFIER="com.koedex.language-setup-debug"
   LS_UI_ELEMENT="<false/>"
   ICON_PLIST_ENTRY=""
 else
@@ -136,7 +153,8 @@ BRANDING_MENU_TEMPLATE="$BRANDING_DIR/KoedexMenuBarTemplate.pdf"
 if [[ "$CONFIGURATION" == "debug" || "$CONFIGURATION" == "release" ]]; then
   [[ -d "$BRANDING_ICONSET_DIR" ]] || {
     echo "エラー: Dockアイコンのiconsetが見つかりません: $BRANDING_ICONSET_DIR" >&2
-    exit 1
+    echo "=== 失敗: 前提条件が満たされていません ===" >&2
+    exit 2
   }
   for icon_name in \
     icon_16x16.png \
@@ -151,16 +169,19 @@ if [[ "$CONFIGURATION" == "debug" || "$CONFIGURATION" == "release" ]]; then
     icon_512x512@2x.png; do
     [[ -f "$BRANDING_ICONSET_DIR/$icon_name" ]] || {
       echo "エラー: Dockアイコンの必須サイズが見つかりません: $BRANDING_ICONSET_DIR/$icon_name" >&2
-      exit 1
+      echo "=== 失敗: 前提条件が満たされていません ===" >&2
+      exit 2
     }
   done
   [[ -f "$BRANDING_MENU_TEMPLATE" ]] || {
     echo "エラー: メニューバー用テンプレートPDFが見つかりません: $BRANDING_MENU_TEMPLATE" >&2
-    exit 1
+    echo "=== 失敗: 前提条件が満たされていません ===" >&2
+    exit 2
   }
   command -v iconutil >/dev/null 2>&1 || {
     echo "エラー: macOSのiconutilが見つからないため、Dockアイコンを生成できません。" >&2
-    exit 1
+    echo "=== 失敗: 前提条件が満たされていません ===" >&2
+    exit 2
   }
 fi
 
@@ -168,7 +189,8 @@ TARGET_APP_DIR="$ROOT_DIR/dist/$APP_NAME"
 if [[ -n "$PREVIOUS_APP_PATH" ]]; then
   [[ -d "$PREVIOUS_APP_PATH" ]] || {
     echo "エラー: 更新前のアプリが見つかりません: $PREVIOUS_APP_PATH" >&2
-    exit 1
+    echo "=== 失敗: 前提条件が満たされていません ===" >&2
+    exit 2
   }
   PREVIOUS_APP_PATH="$(cd "$PREVIOUS_APP_PATH" && pwd -P)"
 fi
@@ -186,7 +208,8 @@ if [[ -d "$TARGET_APP_DIR" ]]; then
 現在の.appを上書きするとmacOS権限が継続しない可能性があるため、ビルドを中止しました。
 署名移行の影響を確認してから、明示的な移行手順で作業してください。
 EOF
-      exit 1
+      echo "=== 失敗: 署名または配置に失敗しました ===" >&2
+      exit 4
     fi
     TARGET_APP_IS_STABLE=true
   else
@@ -206,7 +229,8 @@ if [[ -n "$PREVIOUS_APP_PATH" && "$PREVIOUS_APP_PATH" != "$TARGET_APP_DIR" ]]; t
 macOS権限が継続しない可能性があるため、ビルドを中止しました。署名移行の影響を
 確認してから、明示的な移行手順で作業してください。
 EOF
-      exit 1
+      echo "=== 失敗: 署名または配置に失敗しました ===" >&2
+      exit 4
     fi
     EXTERNAL_REFERENCE_IS_STABLE=true
   else
@@ -278,9 +302,9 @@ cat > "$CONTENTS_DIR/Info.plist" << PLIST
     <key>CFBundleIdentifier</key>
     <string>$BUNDLE_IDENTIFIER</string>
     <key>CFBundleVersion</key>
-    <string>0.1.2</string>
+    <string>0.1.3</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.2</string>
+    <string>0.1.3</string>
     <key>KoedexBuildGitSHA</key>
     <string>$BUILD_GIT_SHA</string>
     <key>CFBundlePackageType</key>
@@ -302,15 +326,32 @@ ${ICON_PLIST_ENTRY}
 </plist>
 PLIST
 
-codesign --force --sign "$SIGN_IDENTITY" "$APP_DIR"
+# ステージング領域（$STAGING_DIRECTORY配下、mktemp -dでスクリプト自身が複製した.app）の
+# 拡張属性を除去する。ユーザーのソースツリーには一切触れない。
+# iCloud同期下で拡張属性（com.apple.fileprovider.dir#N等）が付いたまま作業していると、
+# codesignが "resource fork, Finder information, or similar detritus not allowed" で失敗するため。
+xattr -cr "$APP_DIR"
+
+if ! codesign --force --sign "$SIGN_IDENTITY" "$APP_DIR"; then
+  echo "=== 失敗: コード署名に失敗しました ===" >&2
+  echo "証明書やkeychainの状態を確認し、必要であれば bash scripts/make_signing_cert.sh を再実行してください。" >&2
+  exit 4
+fi
 
 echo "=== 署名検証 ==="
-bash "$ROOT_DIR/scripts/verify_app_identity.sh" "$APP_DIR"
+verify_or_fail() {
+  if ! bash "$ROOT_DIR/scripts/verify_app_identity.sh" "$@"; then
+    echo "=== 失敗: 署名または配置に失敗しました ===" >&2
+    echo "組み立てたアプリの署名を検証できませんでした。既存のアプリは置き換えていません。" >&2
+    exit 4
+  fi
+}
+verify_or_fail "$APP_DIR"
 if [[ "$TARGET_APP_IS_STABLE" == true ]]; then
-  bash "$ROOT_DIR/scripts/verify_app_identity.sh" "$TARGET_APP_DIR" "$APP_DIR"
+  verify_or_fail "$TARGET_APP_DIR" "$APP_DIR"
 fi
 if [[ "$EXTERNAL_REFERENCE_IS_STABLE" == true ]]; then
-  bash "$ROOT_DIR/scripts/verify_app_identity.sh" "$PREVIOUS_APP_PATH" "$APP_DIR"
+  verify_or_fail "$PREVIOUS_APP_PATH" "$APP_DIR"
 fi
 
 if [[ -d "$TARGET_APP_DIR" ]]; then
@@ -321,21 +362,25 @@ if ! mv "$APP_DIR" "$TARGET_APP_DIR"; then
   if [[ -n "$PREVIOUS_TARGET_BACKUP" && -d "$PREVIOUS_TARGET_BACKUP" ]]; then
     if [[ -e "$TARGET_APP_DIR" || -L "$TARGET_APP_DIR" ]]; then
       echo "エラー: 配置失敗後に出力先が存在するため、安全に復元できません。退避コピーを保持しています: $PREVIOUS_TARGET_BACKUP" >&2
-      exit 1
+      echo "=== 失敗: 署名または配置に失敗しました ===" >&2
+      exit 4
     fi
     if mv "$PREVIOUS_TARGET_BACKUP" "$TARGET_APP_DIR"; then
       PREVIOUS_TARGET_BACKUP=""
     else
       echo "エラー: 既存アプリの復元に失敗しました。退避コピーを保持しています: $PREVIOUS_TARGET_BACKUP" >&2
-      exit 1
+      echo "=== 失敗: 署名または配置に失敗しました ===" >&2
+      exit 4
     fi
   fi
   echo "エラー: 検証済みアプリを配置できませんでした。既存アプリを復元しました。" >&2
-  exit 1
+  echo "=== 失敗: 署名または配置に失敗しました ===" >&2
+  exit 4
 fi
 if [[ ! -d "$TARGET_APP_DIR" ]]; then
   echo "エラー: 検証済みアプリの配置を確認できませんでした。" >&2
-  exit 1
+  echo "=== 失敗: 署名または配置に失敗しました ===" >&2
+  exit 4
 fi
 if [[ -n "$PREVIOUS_TARGET_BACKUP" ]]; then
   rm -rf "$PREVIOUS_TARGET_BACKUP"

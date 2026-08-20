@@ -12,8 +12,6 @@ struct OnboardingRestartIntent: Codable, Equatable {
         case permissionRecovery
         case debugPreview
         case debugRehearsal
-        case languageSetupPreview
-        case languageSetupRehearsal
     }
 
     let route: Route
@@ -54,8 +52,6 @@ extension OnboardingPresentationMode {
         case .permissionRecovery: return .permissionRecovery
         case .debugPreview: return .debugPreview
         case .debugRehearsal: return .debugRehearsal
-        case .languageSetupPreview: return .languageSetupPreview
-        case .languageSetupRehearsal: return .languageSetupRehearsal
         case .guide: return nil
         }
     }
@@ -67,8 +63,6 @@ extension OnboardingPresentationMode {
         case .permissionRecovery: self = .permissionRecovery
         case .debugPreview: self = .debugPreview
         case .debugRehearsal: self = .debugRehearsal
-        case .languageSetupPreview: self = .languageSetupPreview
-        case .languageSetupRehearsal: self = .languageSetupRehearsal
         }
     }
 }

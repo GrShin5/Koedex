@@ -55,7 +55,9 @@
 以下は過去のマイルストーンで解決済みの重要な仕組み。**壊さないこと**。
 
 - `signal(SIGPIPE, SIG_IGN)`（`KoedexApp.swift`冒頭）— R2で解決したGUI起動時のSIGPIPEクラッシュ対策。
-- `CodexPathResolver`（`CodexAppServerClient.swift`）— GUI起動時のPATH-less codex spawn対策。
+- `CodexPathResolver`（`Sources/Koedex/Codex/CodexPathResolver.swift`）と、その候補リストを
+  子プロセスのPATH組み立てと共有する `CodexBinaryLocations`（同ディレクトリ）— GUI起動時の
+  PATH-less codex spawn対策。候補の順序は回帰テストで固定してある。
 - CleanupEngineのthread使い回し＋起動フラグ `-c 'mcp_servers={}' -c 'plugins={}'` — 整形レイテンシ2.2秒を保つ根拠。
 - SpeechAnalyzerの `warmUp()` 常駐機構（`TranscriptionEngine.swift`）— 日本語モデル初期化7.9秒を回避するため必須。
 

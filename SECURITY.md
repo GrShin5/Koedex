@@ -20,8 +20,8 @@ Include as much detail as you can:
 
 ## Supported versions
 
-Koedex does not yet have numbered releases with a formal support matrix.
-Until it does, only the latest commit on the default branch is supported.
+Koedex publishes release tags (`v0.1.0` onward) but does not yet have a formal
+support matrix. Only the latest commit on the default branch is supported.
 Please reproduce against a fresh build from `main` before reporting.
 
 ## Response window

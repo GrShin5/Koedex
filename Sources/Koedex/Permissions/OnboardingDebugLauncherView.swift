@@ -16,6 +16,7 @@ struct OnboardingDebugLauncherView: View {
     @State private var restartHandoffTask: Task<Void, Never>?
     @StateObject private var permissionResetController = DebugPermissionResetController()
     @State private var showsPermissionResetConfirmation = false
+    @State private var showsFreshSetupResetConfirmation = false
     private let restartIntentStore = OnboardingRestartIntentStore()
 
     private var uiLanguage: AppLanguage {
@@ -83,6 +84,26 @@ struct OnboardingDebugLauncherView: View {
                 onCancel: {}
             )
         }
+        // 隣のボタンとラベル前半が似ているうえ、こちらは辞書・ショートカット・
+        // 保持日数まで含めて捨てる。取り違えたまま実行させない。
+        .sheet(isPresented: $showsFreshSetupResetConfirmation) {
+            AppConfirmationSheet(
+                title: uiText("Debug設定を新規インストール直後に戻しますか？"),
+                message: uiText("このDebug.appの隔離された設定を全て初期化します。言語、ユーザー辞書、ショートカット、履歴の保持日数、Codexの設定も戻ります。本番Koedexの設定・履歴・辞書には触れません。"),
+                confirmTitle: uiText("初期化"),
+                confirmRole: .destructive,
+                metrics: PopupUIScaleMetrics(settingsMetrics: SettingsUIScaleMetrics(
+                    scale: SettingsUIScaleMetrics.standardScale,
+                    language: uiLanguage
+                )),
+                onConfirm: {
+                    guard settingsStore.canSave else { return }
+                    settingsStore.settings = DebugFreshSetupResetPolicy.freshSettings()
+                    settingsStore.flushPendingSave()
+                },
+                onCancel: {}
+            )
+        }
     }
 
     private var restartHandoffView: some View {
@@ -121,7 +142,7 @@ struct OnboardingDebugLauncherView: View {
             )
 
             VStack(alignment: .leading, spacing: uiMetrics.layout(8)) {
-                Text(uiText("セットアップ状態のリセットは進捗だけを初期化します。macOSの権限は変更しません。"))
+                Text(uiText("セットアップ状態のリセットは進捗だけを初期化します。macOSの権限は変更しません。言語選択画面から確認したい場合は「Debug設定を新規インストール直後に戻す」を使ってください。"))
                     .font(uiMetrics.font(.caption))
                     .foregroundStyle(.secondary)
                 ViewThatFits(in: .horizontal) {
@@ -149,10 +170,20 @@ struct OnboardingDebugLauncherView: View {
                 .foregroundStyle(.orange)
             }
 
+            // 未完了のまま実値を並べると、まだ選んでいない既定値を「選んだ結果」として
+            // 読ませてしまう。確認したいのは選択後の値なので、完了時だけ出す。
             if settingsStore.settings.setupProgress.isComplete {
-                Label(uiText("Debug用のセットアップは完了状態です。リセットすると最初から確認できます。"), systemImage: "checkmark.circle")
+                Label(
+                    uiText("Debug用のセットアップは完了状態です。「Debug設定を新規インストール直後に戻す」を押すと、言語選択から確認し直せます。"),
+                    systemImage: "checkmark.circle"
+                )
+                .font(uiMetrics.font(.caption))
+                .foregroundStyle(.green)
+                confirmationPanel
+            } else {
+                Text(uiText("まだ完了していません。プレビューまたは実機確認から、初回セットアップを開始してください。"))
                     .font(uiMetrics.font(.caption))
-                    .foregroundStyle(.green)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer()
@@ -169,6 +200,12 @@ struct OnboardingDebugLauncherView: View {
             Button(uiText("Debug用セットアップ状態をリセット")) {
                 settingsStore.settings.setupProgress = .newInstall
                 settingsStore.flushPendingSave()
+            }
+            .disabled(!settingsStore.canSave)
+            // 進捗だけのリセットでは言語選択が済んだ状態が残るため、言語選択画面から
+            // 確認したい場合はこちらを使う。Debug.appの保存先だけを初期化する。
+            Button(uiText("Debug設定を新規インストール直後に戻す")) {
+                showsFreshSetupResetConfirmation = true
             }
             .disabled(!settingsStore.canSave)
             Button(uiText("Debug権限をリセット")) {
@@ -206,7 +243,7 @@ struct OnboardingDebugLauncherView: View {
             destination = .preview
         case .debugRehearsal:
             destination = .rehearsal
-        case .firstRun, .upgrade, .permissionRecovery, .guide, .languageSetupPreview, .languageSetupRehearsal:
+        case .firstRun, .upgrade, .permissionRecovery, .guide:
             restartIntentStore.clear()
             restartIntent = nil
         }
@@ -218,6 +255,75 @@ struct OnboardingDebugLauncherView: View {
         restartHandoffTask?.cancel()
         restartHandoffTask = nil
         isWaitingForRestartHandoff = false
+    }
+
+    /// 隔離された保存先に実際に入っている値を、そのまま読める形で見せる。
+    /// 言語選択の結果を実機で確かめるには、選んだ後の保存値を確認できる必要がある。
+    private var confirmationPanel: some View {
+        VStack(alignment: .leading, spacing: uiMetrics.layout(8)) {
+            Label(uiText("隔離された設定値の確認"), systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .font(uiMetrics.font(.headline))
+            settingRow(
+                uiText("表示言語"),
+                settingsStore.settings.languagePreferences.uiLanguage.localizedDisplayName(for: uiLanguage)
+            )
+            settingRow(
+                uiText("音声認識言語"),
+                settingsStore.settings.languagePreferences.sttLanguage.localizedDisplayName(for: uiLanguage)
+            )
+            settingRow(
+                uiText("AI出力言語"),
+                settingsStore.settings.languagePreferences.aiOutputLanguage.localizedDisplayName(for: uiLanguage)
+            )
+            settingRow(
+                uiText("通常モードの出力履歴"),
+                historyRetentionLabel(
+                    isEnabled: settingsStore.settings.historyEnabled,
+                    retentionDays: settingsStore.settings.historyRetentionDays
+                )
+            )
+            settingRow(
+                uiText("ハンズフリー送信モードの出力履歴"),
+                historyRetentionLabel(
+                    isEnabled: settingsStore.settings.handsFreeSendSettings.historyEnabled,
+                    retentionDays: settingsStore.settings.handsFreeSendSettings.historyRetentionDays
+                )
+            )
+            settingRow(
+                uiText("AIに指示モードの入力履歴"),
+                historyRetentionLabel(
+                    isEnabled: settingsStore.settings.aiCommandSettings.historyEnabled,
+                    retentionDays: settingsStore.settings.aiCommandSettings.historyRetentionDays
+                )
+            )
+        }
+        .padding(uiMetrics.layout(14))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private func settingRow(_ title: String, _ value: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value).foregroundStyle(.secondary)
+        }
+        .font(uiMetrics.font(.caption))
+    }
+
+    private func historyRetentionLabel(isEnabled: Bool, retentionDays: Int) -> String {
+        guard isEnabled else { return uiText("保存しない") }
+        switch retentionDays {
+        case 1:
+            return uiText("1日")
+        case 30:
+            return uiText("30日")
+        case 180:
+            return uiText("180日")
+        default:
+            return uiText("無期限")
+        }
     }
 
     private func debugModeCard(
@@ -240,19 +346,16 @@ struct OnboardingDebugLauncherView: View {
 /// 権限をリセットできる隔離Debug.appだけを明示する。
 enum DebugPermissionResetTarget: CaseIterable {
     case onboarding
-    case languageSetup
 
     var bundleIdentifier: String {
         switch self {
         case .onboarding: return OnboardingRuntimeProfile.debugBundleIdentifier
-        case .languageSetup: return OnboardingRuntimeProfile.languageSetupDebugBundleIdentifier
         }
     }
 
     var displayNameKey: String {
         switch self {
         case .onboarding: return "Koedex Debug"
-        case .languageSetup: return "Koedex Language Setup Debug"
         }
     }
 

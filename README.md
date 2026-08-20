@@ -6,8 +6,8 @@
 
 [English](README.md) | [日本語](README.ja.md) | [User guide](docs/manual/en.md) | [日本語ガイド](docs/manual/ja.md)
 
-Koedex is a system-wide voice input app for macOS. Hold down a hotkey (the
-fn key by default) to record, release it to stop: your speech is
+Koedex is a system-wide voice input app for macOS. Press a hotkey (the fn
+key by default) to start recording and press it again to stop: your speech is
 transcribed on-device, cleaned up by AI (filler removal, self-corrections,
 punctuation), and pasted at the cursor position in whatever app is
 frontmost.
@@ -67,7 +67,45 @@ communication channel. See [NOTICE](NOTICE) for the full notice.
   nothing was saved. Retention is configurable per mode in Settings, and
   "unlimited" is still one of the choices.
 
-## Install / build from source
+## Install
+
+Time required: 15-40 minutes (mostly download and build wait time).
+Your input is needed in only 3 places:
+
+1. Entering your Mac password when a dev tool needs updating (skip this if
+   you're already up to date)
+2. Approving a trust dialog for the certificate (Touch ID or password, once)
+3. Granting the three permission dialogs after first launch (Microphone,
+   Speech Recognition, Accessibility)
+
+### A. Let an agent do it (almost no terminal work)
+
+Copy the prompt from [docs/agent-install-prompt.md](docs/agent-install-prompt.md)
+and paste it into Claude Code or Codex CLI.
+
+### B. Run the commands yourself
+
+#### Choosing a work folder
+
+Desktop and Documents are often enrolled in iCloud Drive's "Desktop &
+Documents Folders" sync, and macOS refuses to code-sign anything carrying the
+extended attributes that sync adds. `scripts/make_app.sh` strips those
+attributes from the staging copy it builds itself, just before signing, so a
+synced checkout usually still works. To be safe, use a location outside iCloud
+sync such as `~/Downloads` or `~/Developer`.
+
+If signing fails with `resource fork, Finder information, or similar detritus
+not allowed`, clone again outside the synced folder. **Moving (`mv`) leaves the
+extended attributes in place, so it does not fix the problem.**
+
+#### Preflight check
+
+Running the following before you build checks every prerequisite at once. If
+anything is missing, it prints the full list of what to do.
+
+```bash
+bash scripts/preflight.sh
+```
 
 ```bash
 # From a clone of this repository:
@@ -79,20 +117,42 @@ swift build
 ./scripts/make_app.sh debug
 ```
 
-### Future distribution
+#### If your Swift version is too old
 
-Koedex does not currently provide a distributable release. When one is
+The Command Line Tools can be installed but still be an older version. Update
+with:
+
+```bash
+softwareupdate --list
+sudo softwareupdate --install "<label copied from the --list output>"
+```
+
+The label changes with each release, so don't hardcode it — copy it from the
+`--list` output. The download is roughly 900MB, takes 10-30 minutes, and
+**requires an administrator password**.
+
+#### Future distribution
+
+Koedex does not currently provide a distributable binary release. When one is
 prepared, it must be built from a clean clone of this official repository at
 the matching release tag. Do not distribute an `.app` created from another
 working copy.
 
-### Code-signing certificate (one-time setup)
+#### Code-signing certificate (one-time setup)
 
 `scripts/make_app.sh` refuses to produce an ad-hoc-signed `.app`, because
 ad-hoc signatures change on every rebuild and macOS revokes your
 Accessibility/Microphone/Speech Recognition permissions whenever the
 signing identity changes. Instead it requires a stable, local, self-signed
 "Koedex Dev" certificate.
+
+Creating it needs OpenSSL 3. The `openssl` that ships with macOS is
+LibreSSL, which won't work here. The script automatically looks for
+OpenSSL 3; if it can't find one, install it with:
+
+```bash
+brew install openssl@3
+```
 
 Before your first build, create it:
 
@@ -117,6 +177,15 @@ certificate shows up as a trusted codesigning identity
 (`security find-identity -v -p codesigning`). Once it does, rerun
 `./scripts/make_app.sh debug` (or `release`).
 
+#### Judging whether the build succeeded
+
+To avoid a false read when this is delegated to an agent, judge success by
+all of the following:
+
+1. The script's exit code is 0
+2. `dist/Koedex.app` exists
+3. `codesign --verify --deep --strict dist/Koedex.app` succeeds
+
 ## Granting the three permissions
 
 Koedex needs three macOS privacy permissions. After copying
@@ -140,8 +209,8 @@ until it restarts.
 
 ## Usage
 
-- Place your cursor in any text field, then press and hold **fn** to
-  start recording. Press **fn** again to stop; Koedex transcribes, runs AI
+- Place your cursor in any text field, then press **fn** to start
+  recording. Press **fn** again to stop; Koedex transcribes, runs AI
   cleanup, and pastes the result at the cursor automatically.
 - A small floating HUD shows the current stage ("recording", "cleaning
   up", etc.) while this happens.
@@ -217,11 +286,10 @@ xattr -dr com.apple.quarantine /Applications/Koedex.app
 # Build
 swift build
 
-# Assemble an .app bundle — four targets are supported:
+# Assemble an .app bundle — three targets are supported:
 ./scripts/make_app.sh debug                  # dist/Koedex.app, debug build
 ./scripts/make_app.sh release                # dist/Koedex.app, release build
 ./scripts/make_app.sh onboarding-debug        # dist/Koedex Debug.app, isolated onboarding-flow sandbox
-./scripts/make_app.sh language-setup-debug    # dist/Koedex Language Setup Debug.app, isolated language-setup sandbox
 
 # Regression suite — no network or codex app-server calls
 .build/debug/Koedex --test-regressions
@@ -254,8 +322,8 @@ part of the regression suite and are not run by CI.
 .build/debug/Koedex --test-cleanup-repeat 3 --test-model <slug> --test-effort <effort>
 ```
 
-The `onboarding-debug` and `language-setup-debug` builds use their own
-`~/Library/Application Support/Koedex Debug/` (or equivalent) data
+The `onboarding-debug` build uses its own
+`~/Library/Application Support/Koedex Debug/` data
 directory, so you can rehearse first-run flows without touching your
 regular Koedex settings, history, dictionary, or Codex connection.
 
@@ -274,7 +342,7 @@ here only because it's discoverable from the source anyway.
 It is governed by the compatibility-mode toggle in settings: `enable` refuses
 while that toggle is off, and turning the toggle off clears this flag. Turning
 the toggle back on does not restore it — run `enable` again. The command also
-refuses on the `onboarding-debug` and `language-setup-debug` builds.
+refuses on the `onboarding-debug` build.
 
 Quit Koedex before running any of these. The command refuses while Koedex is
 running, so that the app and the command never both own the settings file.
