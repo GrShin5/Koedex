@@ -18,9 +18,12 @@ URLそのものの正しさを保証するものではありません。**上の
 この文書を配布した経路（このリポジトリ自身）を信頼して確かめてください。**
 
 公式リポジトリにはリリースタグが付いています（`v0.1.0` 以降）。**下のプロンプトは既定で
-`main` ブランチを取得します。** 特定の版に固定したい場合は、プロンプトの clone 行を
-`git clone --branch <タグ名> https://github.com/GrShin5/Koedex.git` の形に書き換えてください。
-固定すると取得のたびに同じ中身になりますが、その後の修正は入りません。
+リリースタグ `v0.1.4` を取得します。** 固定すると取得のたびに同じ中身になりますが、
+その後の修正は入りません。
+
+開発中の最新版（`main` ブランチ）を試したい場合は、プロンプトの clone 行を
+`git clone https://github.com/GrShin5/Koedex.git` に書き換えてください。**ただし
+`main` は常に変化するため、あなたが読んでいるこの説明書の内容と食い違うことがあります。**
 
 ## 設計方針: 「人間のゲートを最初にまとめる」
 
@@ -61,14 +64,21 @@ Koedexの公式リポジトリは https://github.com/GrShin5/Koedex です。
 iCloud同期の対象外の場所（例: ~/Downloads/Koedex）へ、以下のコマンドでcloneしてください。
 デスクトップと書類フォルダは同期対象になっていることが多いので避けてください。
 
-    git clone https://github.com/GrShin5/Koedex.git
+    git clone --branch v0.1.4 --depth 1 https://github.com/GrShin5/Koedex.git
+
+（開発中の最新版が必要な場合のみ、`--branch v0.1.4 --depth 1` を外して `main` を
+取得してください。ただし `main` は常に変化するため、この説明書の内容と食い違う
+ことがあります。）
 
 clone直後に、取得元が公式リポジトリと完全に一致するかを確認してください。
 
     git remote -v
+    git describe --tags
+    git status
 
 出力されたURLが https://github.com/GrShin5/Koedex（末尾に.gitが付く場合を含む）と
 完全に一致しない場合は、そこで作業を止め、一致しない旨を私に報告してください。
+`git describe --tags` と `git status` の結果もあわせて報告してください。
 事前チェックを含め、以降の手順には絶対に進まないでください。
 
 一致を確認できたら、cloneしたディレクトリの中で、以下を実行してください。これは読み取り専用で、何も変更しません。
@@ -154,6 +164,20 @@ clone直後に、取得元が公式リポジトリと完全に一致するかを
 
 ## English versions (concise)
 
+Koedex's official repository is <https://github.com/GrShin5/Koedex>. Anyone can create a
+repository with the same name on GitHub, so the prompts below tell the agent to check the
+remote URL against that one immediately after cloning and to stop if it does not match.
+That check catches the agent picking a different source on its own, and it catches starting
+work in some other clone you already had. It does not vouch for the URL itself: **trust that
+this URL is Koedex's official one only as far as you trust the channel that gave you this
+document — this repository itself.**
+
+The official repository carries release tags (`v0.1.0` onward). **The prompt below clones
+the release tag `v0.1.4` by default**, so you get the same contents every time, without any
+later fixes. If you want the latest in-development version instead, tell the agent to clone
+`main` — but note that **`main` changes constantly, so it may differ from the manual you're
+reading.**
+
 ### Prompt A (Claude Code)
 
 ````
@@ -162,13 +186,17 @@ the terminal, so please follow these rules:
 
 - Don't stop repeatedly for small issues. Koedex's official repository is
   `https://github.com/GrShin5/Koedex`. Clone it with
-  `git clone https://github.com/GrShin5/Koedex.git` into a location outside iCloud sync
-  (Desktop and Documents usually are synced; `~/Downloads/Koedex` is fine). Immediately after
-  cloning, run `git remote -v` and confirm the URL matches `https://github.com/GrShin5/Koedex`
-  exactly (with or without a trailing `.git`). If it doesn't match, stop right there, report
-  it, and do not proceed to any later step, including preflight — don't run any script.
-  Once confirmed, run `bash scripts/preflight.sh` inside it — it is read-only — and report
-  every finding at once as a table, not one at a time.
+  `git clone --branch v0.1.4 --depth 1 https://github.com/GrShin5/Koedex.git` into a location
+  outside iCloud sync (Desktop and Documents usually are synced; `~/Downloads/Koedex` is
+  fine). (Only if the latest in-development version is specifically needed, drop
+  `--branch v0.1.4 --depth 1` and clone `main` instead — but `main` changes constantly, so it
+  may differ from this manual.) Immediately after cloning, run `git remote -v`,
+  `git describe --tags`, and `git status`, and confirm the remote URL matches
+  `https://github.com/GrShin5/Koedex` exactly (with or without a trailing `.git`). If it
+  doesn't match, stop right there, report it along with the `git describe --tags` and
+  `git status` output, and do not proceed to any later step, including preflight — don't run
+  any script. Once confirmed, run `KOEDEX_LANG=en bash scripts/preflight.sh` inside it — it
+  is read-only — and report every finding at once as a table, not one at a time.
 - After that, list everything that needs MY action (e.g. anything requiring an admin
   password) in one batch, with copy-pasteable one-line commands, and wait until I say I'm
   done.
@@ -192,7 +220,8 @@ the terminal, so please follow these rules:
 - Explain what you're about to do before each step. Password entry, keychain approval, and
   permission dialogs are things only I can do — tell me what to do and wait.
 
-When done, explain: (1) how to open the app past Gatekeeper the first time, (2) how to grant
+When done, explain: (1) how to open the app the first time, including how to get past
+Gatekeeper if macOS blocks it, (2) how to grant
 the three permissions (Microphone, Speech Recognition, Accessibility), (3) how to verify the
 Codex CLI connection and what to do if it isn't connected.
 ````

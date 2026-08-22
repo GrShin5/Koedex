@@ -43,6 +43,25 @@ Run this before opening a pull request. A handful of pasteboard fixtures
 require a real pasteboard server and self-skip with a printed notice in
 headless/CI-like environments — that is expected, not a failure.
 
+## What the public CI actually runs
+
+The `build` workflow (`.github/workflows/build.yml`) runs against this public repository,
+which does not contain every file in the development source. Concretely, it runs:
+
+- Toolchain info (`swift --version`)
+- `swift build`
+- The regression suite (`.build/debug/Koedex --test-regressions`)
+- The log-hygiene check
+
+It always skips, while printing a notice that it did so:
+
+- Localization coverage (`scripts/check_localization_coverage.py`)
+- The `scripts/tests` suite (`python3 -m unittest discover -s scripts/tests`)
+
+Both are skipped because the files they depend on are development-side only and are not
+part of the public repository. **A green CI badge therefore does not mean those two checks
+ran** — check the workflow logs for the "skipped: ..." lines if you need to confirm.
+
 ## Code style
 
 - Follow the style of the surrounding code rather than introducing a new

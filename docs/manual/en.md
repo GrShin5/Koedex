@@ -374,10 +374,13 @@ If you're comfortable with the command line, you can build it yourself. See
 
 ### Opening the app for the first time
 
-Koedex is currently distributed [self-signed](#self-signed), so macOS's
-[Gatekeeper](#gatekeeper) blocks it the first time you try to open it.
+Koedex is currently distributed [self-signed](#self-signed) and is not
+notarized. An app you built yourself on this Mac normally opens without any
+warning. If you obtained the `.app` some other way — downloaded, AirDropped,
+or copied from another Mac — macOS's [Gatekeeper](#gatekeeper) may block the
+first launch.
 
-There are two ways to open it:
+If that happens, there are two ways to open it:
 
 1. Right-click (or Control-click) `Koedex.app`, choose **"Open,"** and approve it in the
    confirmation dialog that appears.
@@ -1359,6 +1362,19 @@ account.**
 > approved), enabled personal-dictionary entries, and your custom instructions are all
 > passed to `codex`. The only way to stop this is to not use AI Command mode itself.
 
+> **Note**: Koedex refuses to read the current selection whenever macOS reports that
+> secure input is active. This covers ordinary password fields in native Mac apps, as
+> well as password fields in Safari, Chrome, and similar browsers.
+
+> **Note**: It does not, however, detect fields that merely look secret but are,
+> technically, ordinary text fields. One-time passcode (OTP) and two-factor
+> authentication (2FA) boxes are the main example. In fields like these, don't select
+> the text, and don't start AI Command mode.
+
+> **Note**: Selected text and web-search results are sent to the AI, and can also
+> influence where the AI decides to place its answer. Always check the result before
+> relying on it.
+
 #### Koedex never touches Codex CLI's own configuration
 
 When Koedex launches `codex`, it passes `mcp_servers={}` and `plugins={}`. It never
@@ -1524,8 +1540,9 @@ A red banner appears at the top of the screen reading "Settings cannot be saved.
 
 ### The app can't be opened ("cannot be opened because the developer cannot be verified," etc.)
 
-Koedex is currently [self-signed](#self-signed), so macOS's [Gatekeeper](#gatekeeper) blocks
-the first launch.
+Koedex is currently [self-signed](#self-signed) and is not notarized. An app you built
+yourself normally opens without a warning, but if the `.app` reached this Mac some other way,
+macOS's [Gatekeeper](#gatekeeper) can block the first launch.
 
 | # | What to do |
 | --- | --- |
@@ -2201,8 +2218,9 @@ Move `dist/Koedex.app` into `/Applications`. Dragging it there in Finder works t
 
 ### Step 5: First launch
 
-Koedex is currently [self-signed](#self-signed), so [Gatekeeper](#gatekeeper) blocks the
-first launch.
+Koedex is currently [self-signed](#self-signed) and is not notarized. An app you just built
+here normally opens without a warning. If [Gatekeeper](#gatekeeper) does block the first
+launch, open it this way:
 
 | # | How to open it |
 | --- | --- |
@@ -2221,8 +2239,8 @@ Once it launches, continue with [6. First-time setup](#6-first-time-setup).
 
 | Item | Detail |
 | --- | --- |
-| Release covered | v0.1.3 |
-| App version covered | 0.1.3 |
+| Release covered | v0.1.4 |
+| App version covered | 0.1.4 |
 | Manual language | English |
 
 This manual was written against the source code in the release above. Newer versions may
@@ -2234,8 +2252,9 @@ Distribution method, signing, and notarization status are covered in
 [Chapter 5, "Current distribution method"](#current-distribution-method). This chapter
 doesn't repeat them.
 
-Because of this, macOS's [Gatekeeper](#gatekeeper) blocks the first launch. This is
-expected behavior. See [Chapter 5](#opening-the-app-for-the-first-time) and
+Because of this, macOS's [Gatekeeper](#gatekeeper) can block the first launch when the
+`.app` did not come from a build on this Mac. This is expected behavior. See
+[Chapter 5](#opening-the-app-for-the-first-time) and
 [Appendix B, Step 5](#step-5-first-launch) for how to open it.
 
 If the distribution method changes, review both

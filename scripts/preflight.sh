@@ -16,6 +16,34 @@ for arg in "$@"; do
   esac
 done
 
+# 表示言語。検査内容・判定・終了コードは言語に依存しない。表示文字列だけを切り替える。
+# KOEDEX_LANG が最優先。未設定ならロケールから推定し、判定できなければ日本語にする
+# （従来の挙動を既定として保つ）。
+UI_LANG="ja"
+# 大小文字と地域指定（en_US など）を吸収するため、小文字化してから判定する。
+PREFLIGHT_LANG_REQUEST="$(printf '%s' "${KOEDEX_LANG:-}" | tr '[:upper:]' '[:lower:]')"
+case "$PREFLIGHT_LANG_REQUEST" in
+  en|en[-_.]*) UI_LANG="en" ;;
+  ja|ja[-_.]*) UI_LANG="ja" ;;
+  "")
+    PREFLIGHT_LOCALE="$(printf '%s' "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" | tr '[:upper:]' '[:lower:]')"
+    case "$PREFLIGHT_LOCALE" in
+      ""|ja*|c|c.*|posix) UI_LANG="ja" ;;
+      *) UI_LANG="en" ;;
+    esac
+    ;;
+  *) UI_LANG="ja" ;;
+esac
+
+# 第1引数が日本語、第2引数が英語。
+t() {
+  if [[ "$UI_LANG" == "en" ]]; then
+    printf '%s' "$2"
+  else
+    printf '%s' "$1"
+  fi
+}
+
 cd "$(dirname "$0")/.."
 ROOT_DIR="$(pwd)"
 
@@ -35,10 +63,13 @@ record() {
 
 # 1. Xcode Command Line Tools
 if xcode-select -p >/dev/null 2>&1; then
-  record ok "Xcode Command Line Toolsが導入されています"
+  record ok "$(t "Xcode Command Line Toolsが導入されています" \
+                 "Xcode Command Line Tools are installed")"
 else
-  record fail "Xcode Command Line Toolsが見つかりません"
-  ACTION_ITEMS+=("ターミナルで \`xcode-select --install\` を実行し、案内に沿ってインストールしてください。")
+  record fail "$(t "Xcode Command Line Toolsが見つかりません" \
+                   "Xcode Command Line Tools were not found")"
+  ACTION_ITEMS+=("$(t "ターミナルで \`xcode-select --install\` を実行し、案内に沿ってインストールしてください。" \
+                      "Run \`xcode-select --install\` in Terminal and follow the prompts to install them.")")
 fi
 
 # 2. Swiftのバージョンが6.2以上か
@@ -63,10 +94,13 @@ if [[ -n "$SWIFT_VERSION" ]]; then
   fi
 fi
 if [[ "$SWIFT_OK" -eq 1 ]]; then
-  record ok "Swiftのバージョンは${SWIFT_VERSION}です（6.2以上）"
+  record ok "$(t "Swiftのバージョンは${SWIFT_VERSION}です（6.2以上）" \
+                 "Swift version is ${SWIFT_VERSION} (6.2 or later)")"
 else
-  record fail "Swiftのバージョンが6.2未満、または確認できません（検出値: ${SWIFT_VERSION:-不明}）"
-  ACTION_ITEMS+=("\`softwareupdate --list\` の出力を確認し、Swift 6.2以降を含むmacOSアップデートのラベルを出力からコピーして \`sudo softwareupdate --install \"<ラベル>\"\` を実行してください（ラベルは版ごとに変わるため固定文字列ではなく必ず出力からコピーしてください）。約900MBのダウンロードで10〜30分かかり、管理者パスワードの入力が1回必要です。")
+  record fail "$(t "Swiftのバージョンが6.2未満、または確認できません（検出値: ${SWIFT_VERSION:-不明}）" \
+                   "Swift is older than 6.2, or its version could not be determined (detected: ${SWIFT_VERSION:-unknown})")"
+  ACTION_ITEMS+=("$(t "\`softwareupdate --list\` の出力を確認し、Swift 6.2以降を含むmacOSアップデートのラベルを出力からコピーして \`sudo softwareupdate --install \"<ラベル>\"\` を実行してください（ラベルは版ごとに変わるため固定文字列ではなく必ず出力からコピーしてください）。約900MBのダウンロードで10〜30分かかり、管理者パスワードの入力が1回必要です。" \
+                      "Check the output of \`softwareupdate --list\`, copy the label of the macOS update that includes Swift 6.2 or later from that output, then run \`sudo softwareupdate --install \"<label>\"\` (labels change between releases, so always copy the label from the output rather than typing a fixed string). The download is around 900MB and takes 10-30 minutes, and you will be asked for your administrator password once.")")
 fi
 
 # 証明書がすでにあるかどうかを先に確定させる。opensslは証明書の「作成」にだけ必要なので、
@@ -94,15 +128,20 @@ if [[ "$OPENSSL_VERSION_OUTPUT" == *LibreSSL* ]]; then
     fi
   done
   if [[ -n "$OPENSSL3_PATH" ]]; then
-    record ok "システムのopensslはLibreSSLですが、OpenSSL 3が見つかりました: $OPENSSL3_PATH"
+    record ok "$(t "システムのopensslはLibreSSLですが、OpenSSL 3が見つかりました: $OPENSSL3_PATH" \
+                   "The system openssl is LibreSSL, but OpenSSL 3 was found at: $OPENSSL3_PATH")"
   elif [[ "$SIGNING_CERT_EXISTS" -eq 1 ]]; then
-    record warn "システムのopensslがLibreSSLでOpenSSL 3も見つかりませんが、証明書は作成済みのためビルドは進められます"
+    record warn "$(t "システムのopensslがLibreSSLでOpenSSL 3も見つかりませんが、証明書は作成済みのためビルドは進められます" \
+                     "The system openssl is LibreSSL and OpenSSL 3 was not found, but the certificate already exists, so the build can proceed")"
   else
-    record fail "システムのopensslがLibreSSLで、OpenSSL 3が見つかりません（証明書作成に必要です）"
-    ACTION_ITEMS+=("\`brew install openssl@3\` を実行してOpenSSL 3を導入してください。")
+    record fail "$(t "システムのopensslがLibreSSLで、OpenSSL 3が見つかりません（証明書作成に必要です）" \
+                     "The system openssl is LibreSSL and OpenSSL 3 was not found (it is required to create the certificate)")"
+    ACTION_ITEMS+=("$(t "\`brew install openssl@3\` を実行してOpenSSL 3を導入してください。" \
+                        "Run \`brew install openssl@3\` to install OpenSSL 3.")")
   fi
 else
-  record ok "opensslはOpenSSL 3系です"
+  record ok "$(t "opensslはOpenSSL 3系です" \
+                 "openssl is OpenSSL 3.x")"
 fi
 
 # 4. リポジトリのパスがiCloud同期下にないか
@@ -120,17 +159,22 @@ if [[ "$ICLOUD_DETECTED" -eq 1 ]]; then
   # make_app.sh は署名の直前に、自分で作ったステージング複製へ xattr -cr をかけるため、
   # 多くの場合はこの場所のままでも署名できる。ただしiCloudが同期中に属性を付け直すことが
   # あるので、失敗した時の対処だけは先に伝えておく。
-  record warn "リポジトリのパスがiCloud同期対象のディレクトリ配下にあります（署名の直前に拡張属性を除去するため、多くの場合はこのまま進められます）"
-  record warn "もし署名で \"resource fork, Finder information, or similar detritus not allowed\" が出たら、\`~/Downloads\` など同期対象外の場所へ clone し直してください（\`mv\` での移動では拡張属性が残るため解決しません）"
+  record warn "$(t "リポジトリのパスがiCloud同期対象のディレクトリ配下にあります（署名の直前に拡張属性を除去するため、多くの場合はこのまま進められます）" \
+                   "The repository is inside a directory that iCloud syncs (extended attributes are stripped just before signing, so in most cases you can proceed as is)")"
+  record warn "$(t "もし署名で \"resource fork, Finder information, or similar detritus not allowed\" が出たら、\`~/Downloads\` など同期対象外の場所へ clone し直してください（\`mv\` での移動では拡張属性が残るため解決しません）" \
+                   "If signing fails with \"resource fork, Finder information, or similar detritus not allowed\", clone the repository again somewhere outside iCloud such as \`~/Downloads\` (moving it with \`mv\` keeps the extended attributes, so that does not fix it)")"
 else
-  record ok "リポジトリのパスはiCloud同期対象ではありません"
+  record ok "$(t "リポジトリのパスはiCloud同期対象ではありません" \
+                 "The repository path is not synced by iCloud")"
 fi
 
 # 5. /Applications/Koedex.app が既に存在するか（警告のみ、不合格にはしない）
 if [[ -e "/Applications/Koedex.app" ]]; then
-  record warn "/Applications/Koedex.app が既に存在します。上書きする前に内容を確認してください"
+  record warn "$(t "/Applications/Koedex.app が既に存在します。上書きする前に内容を確認してください" \
+                   "/Applications/Koedex.app already exists. Check what it is before overwriting it")"
 else
-  record ok "/Applications/Koedex.app はまだ存在しません"
+  record ok "$(t "/Applications/Koedex.app はまだ存在しません" \
+                 "/Applications/Koedex.app does not exist yet")"
 fi
 
 # 6. 空きディスク容量が2GB以上あるか
@@ -143,28 +187,36 @@ else
   AVAILABLE_GB=0
 fi
 if [[ "$AVAILABLE_KB" -ge $((2 * 1024 * 1024)) ]]; then
-  record ok "空きディスク容量は約${AVAILABLE_GB}GB以上あります"
+  record ok "$(t "空きディスク容量は約${AVAILABLE_GB}GB以上あります" \
+                 "About ${AVAILABLE_GB}GB or more of free disk space is available")"
 else
-  record fail "空きディスク容量が不足しています（空き約${AVAILABLE_GB}GB、必要2GB以上）"
-  ACTION_ITEMS+=("空き容量を2GB以上確保してください。")
+  record fail "$(t "空きディスク容量が不足しています（空き約${AVAILABLE_GB}GB、必要2GB以上）" \
+                   "Not enough free disk space (about ${AVAILABLE_GB}GB free, 2GB or more required)")"
+  ACTION_ITEMS+=("$(t "空き容量を2GB以上確保してください。" \
+                      "Free up disk space so that at least 2GB is available.")")
 fi
 
 # 7. コード署名用証明書 "Koedex Dev" が信頼済みアイデンティティとして存在するか
 if [[ "$SIGNING_CERT_EXISTS" -eq 1 ]]; then
-  record ok "コード署名用証明書 \"Koedex Dev\" が見つかりました"
+  record ok "$(t "コード署名用証明書 \"Koedex Dev\" が見つかりました" \
+                 "The code-signing certificate \"Koedex Dev\" was found")"
 else
-  record warn "コード署名用証明書 \"Koedex Dev\" はまだ作成されていません（初回は次の手順で作成します）"
-  ACTION_ITEMS+=("\`bash scripts/make_signing_cert.sh\` を実行して証明書を作成してください（初回のみ。macOSの認証ダイアログの承認が1回必要です）。")
+  record warn "$(t "コード署名用証明書 \"Koedex Dev\" はまだ作成されていません（初回は次の手順で作成します）" \
+                   "The code-signing certificate \"Koedex Dev\" has not been created yet (create it once, as described below)")"
+  ACTION_ITEMS+=("$(t "\`bash scripts/make_signing_cert.sh\` を実行して証明書を作成してください（初回のみ。macOSの認証ダイアログの承認が1回必要です）。" \
+                      "Run \`bash scripts/make_signing_cert.sh\` to create the certificate (once only; macOS will ask you to approve one authentication dialog).")")
 fi
 
 print_report() {
-  echo "=== Koedexビルド前提条件チェック ==="
+  echo "$(t "=== Koedexビルド前提条件チェック ===" \
+            "=== Koedex build prerequisite check ===")"
   for line in "${RESULT_LINES[@]}"; do
     echo "$line"
   done
   if [[ "${#ACTION_ITEMS[@]}" -gt 0 ]]; then
     echo ""
-    echo "=== あなたがやること ==="
+    echo "$(t "=== あなたがやること ===" \
+              "=== What you need to do ===")"
     local i=1
     for action in "${ACTION_ITEMS[@]}"; do
       echo "$i. $action"

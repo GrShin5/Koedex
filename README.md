@@ -16,6 +16,16 @@ frontmost.
 > setup, and every setting in plain language.
 > This README is the developer-facing summary.
 
+## Early access
+
+This is an early public release, not a finished product. It's published
+so that real users can try it and report problems and improvement ideas —
+that feedback is what drives development from here.
+
+- Bug reports and feature requests → [GitHub Issues](../../issues).
+- Security vulnerabilities → please do **not** open a public issue; follow
+  the process in [SECURITY.md](SECURITY.md) instead.
+
 ## Not affiliated with OpenAI
 
 Koedex is an independent, community project. It is **not affiliated with,
@@ -67,6 +77,19 @@ communication channel. See [NOTICE](NOTICE) for the full notice.
   nothing was saved. Retention is configurable per mode in Settings, and
   "unlimited" is still one of the choices.
 
+### Known limitations
+
+- **Koedex refuses to read a selection when macOS reports secure input is
+  active.** This covers ordinary password fields in native apps and in
+  Safari/Chrome.
+- **It does not detect fields that merely look secret but are technically
+  ordinary text fields.** One-time passcode / 2FA code boxes are the main
+  example. Do not select text in a field like that and start AI command
+  mode.
+- **Selected text and web-search results are sent to the AI, and they can
+  also influence where the AI decides to put its answer.** Always look at
+  the result before relying on it.
+
 ## Install
 
 Time required: 15-40 minutes (mostly download and build wait time).
@@ -105,6 +128,13 @@ anything is missing, it prints the full list of what to do.
 
 ```bash
 bash scripts/preflight.sh
+```
+
+It picks its language from your locale. To force English regardless of your
+locale:
+
+```bash
+KOEDEX_LANG=en bash scripts/preflight.sh
 ```
 
 ```bash
@@ -177,6 +207,29 @@ certificate shows up as a trusted codesigning identity
 (`security find-identity -v -p codesigning`). Once it does, rerun
 `./scripts/make_app.sh debug` (or `release`).
 
+#### Removing the certificate
+
+If you no longer need the "Koedex Dev" certificate — for example, you're
+done building Koedex on this Mac — remove it:
+
+1. Confirm it's actually installed:
+
+   ```bash
+   security find-identity -v -p codesigning
+   ```
+
+2. Delete the certificate and its private key from the login keychain:
+
+   ```bash
+   security delete-identity -c "Koedex Dev" "$HOME/Library/Keychains/login.keychain-db"
+   ```
+
+3. Remove the leftover trust entry. macOS sometimes keeps an orphaned
+   trust record behind after the certificate itself is gone, and this step
+   has no reliable command-line equivalent — open Keychain Access, search
+   for "Koedex Dev" under **Certificates**, and delete it there if it still
+   appears.
+
 #### Judging whether the build succeeded
 
 To avoid a false read when this is delegated to an agent, judge success by
@@ -238,9 +291,11 @@ something rather than just transcribing:
   configurable).
 - **With text selected** when you start recording: your spoken instruction
   is applied to the selected text (summarize, translate, rewrite, etc.).
-  The result is pasted back only if the original caret position is still
-  verified safe at stop time; otherwise it's shown in a separate,
-  copyable window instead of being inserted blindly. Web search is
+  The result is pasted back when the original caret position is still
+  verified safe at stop time. If that strict check fails, the result is
+  shown in a separate, copyable window rather than inserted blindly —
+  unless Compatibility Input Mode is on, in which case Koedex falls back
+  to sending the text as keystrokes. Web search is
   disabled in this path for safety, since selected text could contain
   a prompt-injection attempt.
 - **Without a selection**: your spoken instruction is treated as a
@@ -256,29 +311,6 @@ Hands-free send lets you speak a trigger phrase to automatically send your
 message (by simulating Return, ⌘Return, or ⌃Return) instead of pasting and
 stopping there. It is off by default and configured separately in
 Settings, with its own explicit opt-in for auto-sending in external apps.
-
-## Running the app the first time (Gatekeeper)
-
-Releases of Koedex are currently **not notarized**. The first time you
-open a downloaded `Koedex.app`, macOS Gatekeeper will refuse to launch it
-with a normal double-click.
-
-To open it:
-
-1. Right-click (or Control-click) `Koedex.app` and choose **Open**, then
-   confirm in the dialog that appears; **or**
-2. Try to open it normally once (it will be blocked), then go to
-   **System Settings → Privacy & Security** and click **Open Anyway** next
-   to the Koedex entry.
-
-You only need to do this once per build. If neither of the above works —
-for example because of how the file was transferred — and you've verified
-where you got the file from, you can clear the quarantine flag directly as
-a last resort:
-
-```bash
-xattr -dr com.apple.quarantine /Applications/Koedex.app
-```
 
 ## Development
 
