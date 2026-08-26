@@ -3177,6 +3177,129 @@ enum RegressionTestSuite {
         } else {
             expect(false, "restart intent records the source PID and generation")
         }
+        if let sourcePID = restartIntent.sourceProcessIdentifier,
+           let generation = restartIntent.generation,
+           let createdAt = restartIntent.createdAt,
+           let expiresAt = restartIntent.expiresAt {
+            expect(
+                restartIntent.handoffStatus == .pending
+                    && restartIntent.handoffFailure == nil
+                    && OnboardingRestartHandoff.sourceProcessState(
+                        restartIntent,
+                        now: createdAt,
+                        currentProcessIdentifier: sourcePID + 1,
+                        isProcessAlive: { $0 == sourcePID }
+                    ) == .alive
+                    && OnboardingRestartHandoff.sourceProcessState(
+                        restartIntent,
+                        now: createdAt,
+                        currentProcessIdentifier: sourcePID + 1,
+                        isProcessAlive: { _ in false }
+                    ) == .exited
+                    && OnboardingRestartHandoff.sourceProcessState(
+                        restartIntent,
+                        now: expiresAt,
+                        currentProcessIdentifier: sourcePID + 1,
+                        isProcessAlive: { _ in true }
+                    ) == .timedOut,
+                "restart handoff distinguishes alive, exited, and timed-out source PIDs"
+            )
+            expect(
+                OnboardingRestartHandoff.validatesHelperInvocation(
+                    intent: restartIntent,
+                    bundleIdentifier: restartIntent.bundleIdentifier,
+                    sourcePID: sourcePID,
+                    generation: generation,
+                    createdAt: createdAt,
+                    expiresAt: expiresAt,
+                    now: createdAt
+                )
+                    && !OnboardingRestartHandoff.validatesHelperInvocation(
+                        intent: restartIntent,
+                        bundleIdentifier: "com.example.other",
+                        sourcePID: sourcePID,
+                        generation: generation,
+                        createdAt: createdAt,
+                        expiresAt: expiresAt,
+                        now: createdAt
+                    )
+                    && !OnboardingRestartHandoff.validatesHelperInvocation(
+                        intent: restartIntent,
+                        bundleIdentifier: restartIntent.bundleIdentifier,
+                        sourcePID: sourcePID,
+                        generation: UUID(),
+                        createdAt: createdAt,
+                        expiresAt: expiresAt,
+                        now: createdAt
+                    )
+                    && !OnboardingRestartHandoff.validatesHelperInvocation(
+                        intent: restartIntent,
+                        bundleIdentifier: restartIntent.bundleIdentifier,
+                        sourcePID: sourcePID,
+                        generation: generation,
+                        createdAt: createdAt,
+                        expiresAt: expiresAt,
+                        now: expiresAt
+                    ),
+                "restart helper rejects bundle, generation, and expiry mismatches"
+            )
+            var helperFailedIntent = restartIntent
+            helperFailedIntent.handoffStatus = .helperFailed
+            helperFailedIntent.handoffFailure = .sourceExitTimedOut
+            expect(
+                helperFailedIntent.step == .permissions
+                    && helperFailedIntent.presentationMode == restartIntent.presentationMode,
+                "helper failure retains the restart intent for manual Step 3 recovery"
+            )
+            var helperSuccessIntent = restartIntent
+            helperSuccessIntent.handoffStatus = .helperLaunched
+            expect(
+                OnboardingRestartFeedbackPolicy.initialFeedbackKey(for: helperFailedIntent)
+                    == "アプリを再起動できませんでした。少し待ってから、もう一度試してください。"
+                    && OnboardingRestartFeedbackPolicy.initialFeedbackKey(for: helperSuccessIntent) == nil,
+                "only a failed helper handoff displays the restart error on Step 3"
+            )
+        } else {
+            expect(false, "restart intent records helper validation fields")
+        }
+        let legacyRestartIntentData = Data(
+            "{\"route\":\"firstRun\",\"step\":\"permissions\",\"bundleIdentifier\":\"com.koedex.app\"}".utf8
+        )
+        let legacyRestartIntent = try? JSONDecoder().decode(OnboardingRestartIntent.self, from: legacyRestartIntentData)
+        expect(
+            legacyRestartIntent?.sourceProcessIdentifier == nil
+                && legacyRestartIntent?.generation == nil
+                && legacyRestartIntent?.handoffStatus == nil
+                && legacyRestartIntent?.handoffFailure == nil
+                && legacyRestartIntent.flatMap { OnboardingRestartFeedbackPolicy.initialFeedbackKey(for: $0) } == nil,
+            "legacy restart intent without helper fields remains decodable and shows no failure feedback"
+        )
+        expect(
+            OnboardingRestartRequestPolicy.permitsRestart(isRestarting: false)
+                && !OnboardingRestartRequestPolicy.permitsRestart(isRestarting: true),
+            "repeated restart taps do not start a second helper handoff"
+        )
+        var terminationReplyCount = 0
+        var terminationWarningCount = 0
+        let terminationCoordinator = ApplicationTerminationCoordinator(
+            shutdown: {},
+            reply: { terminationReplyCount += 1 },
+            timeoutWarning: { terminationWarningCount += 1 }
+        )
+        let firstTerminationRequest = terminationCoordinator.request()
+        let repeatedTerminationRequest = terminationCoordinator.request()
+        terminationCoordinator.replyOnce()
+        terminationCoordinator.replyOnce()
+        terminationCoordinator.handleTimeout()
+        expect(
+            firstTerminationRequest == .terminateLater
+                && repeatedTerminationRequest == .terminateLater
+                && terminationCoordinator.state == .replied
+                && terminationReplyCount == 1
+                && terminationWarningCount == 0
+                && terminationCoordinator.request() == .terminateNow,
+            "normal shutdown suppresses timeout warning and multiple Quit requests reply exactly once"
+        )
         restartIntentStore.clear()
         expect(
             restartIntentStore.load(bundleIdentifier: "com.koedex.onboarding-debug") == nil,

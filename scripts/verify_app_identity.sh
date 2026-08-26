@@ -11,6 +11,10 @@
 # --signer-fingerprint はmake_app.sh内部でのみ使う機械可読な確認用。
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+# shellcheck source=lib/install_checks.sh
+source "$SCRIPT_DIR/lib/install_checks.sh"
+
 usage() {
   cat >&2 <<EOF
 Usage:
@@ -45,7 +49,7 @@ validated_signer_fingerprint=""
 verify_app() {
   local requested_path="$1"
   local app_path info_plist bundle_id bundle_icon_file ls_ui_element signed_metadata signed_identifier requirement_metadata requirement
-  local certificate_directory certificate_prefix leaf_certificate signer_fingerprint
+  local certificate_directory certificate_prefix leaf_certificate signer_fingerprint codesign_log codesign_error
 
   [[ -d "$requested_path" ]] || fail "アプリが見つかりません: $requested_path"
   app_path="$(cd "$requested_path" && pwd -P)"
@@ -83,9 +87,13 @@ verify_app() {
     [[ -f "$app_path/Contents/Resources/en.lproj/Localizable.strings" ]] || fail "Debug版の英語文字列カタログが見つかりません: $app_path"
   fi
 
-  if ! codesign --verify --deep --strict --verbose=2 "$app_path" >/dev/null 2>&1; then
-    fail "コード署名の検証に失敗しました: $app_path"
+  codesign_log="$(mktemp "${TMPDIR:-/tmp}/koedex-codesign.XXXXXX")" || fail "署名検証ログを作成できません。"
+  if ! codesign --verify --deep --strict --verbose=2 "$app_path" >/dev/null 2>"$codesign_log"; then
+    codesign_error="$(<"$codesign_log")"
+    rm -f "$codesign_log"
+    fail "コード署名の検証に失敗しました ($(koedex_codesign_failure_class "$codesign_error")): $app_path${codesign_error:+$'\n'codesign: $codesign_error}"
   fi
+  rm -f "$codesign_log"
 
   signed_metadata="$(codesign -dvv "$app_path" 2>&1)"
   signed_identifier="$(printf '%s\n' "$signed_metadata" | sed -n 's/^Identifier=//p' | head -n 1)"

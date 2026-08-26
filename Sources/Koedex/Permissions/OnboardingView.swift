@@ -39,6 +39,7 @@ struct OnboardingView: View {
     @ObservedObject var settingsStore: SettingsStore
     let mode: OnboardingPresentationMode
     let forcedInitialStep: OnboardingStep?
+    let initialRestartFeedback: String?
     let onForcedInitialStepPresented: (() -> Void)?
     let onRestartPreparationCompleted: () -> Void
     let onRestartFailure: () -> Void
@@ -92,6 +93,7 @@ struct OnboardingView: View {
         settingsStore: SettingsStore,
         mode: OnboardingPresentationMode,
         forcedInitialStep: OnboardingStep?,
+        initialRestartFeedback: String? = nil,
         onForcedInitialStepPresented: (() -> Void)?,
         onRestartPreparationCompleted: @escaping () -> Void,
         onRestartFailure: @escaping () -> Void,
@@ -102,6 +104,7 @@ struct OnboardingView: View {
         self.settingsStore = settingsStore
         self.mode = mode
         self.forcedInitialStep = forcedInitialStep
+        self.initialRestartFeedback = initialRestartFeedback
         self.onForcedInitialStepPresented = onForcedInitialStepPresented
         self.onRestartPreparationCompleted = onRestartPreparationCompleted
         self.onRestartFailure = onRestartFailure
@@ -111,6 +114,9 @@ struct OnboardingView: View {
                 transcriptionEngine: practiceTranscriptionEngine ?? TranscriptionEngine()
             )
         )
+        _appRestartFeedback = State(initialValue: initialRestartFeedback.map {
+            AppLocalizer.text($0, language: settingsStore.settings.languagePreferences.uiLanguage)
+        })
     }
 
     private var steps: [OnboardingStep] {
@@ -1945,6 +1951,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         show(
             mode: mode,
             forcedInitialStep: intent.step,
+            initialRestartFeedback: OnboardingRestartFeedbackPolicy.initialFeedbackKey(for: intent),
             startsPolling: true,
             onForcedInitialStepPresented: onPresented,
             onFinish: { onFinish(mode) }
@@ -1959,6 +1966,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     private func show(
         mode: OnboardingPresentationMode,
         forcedInitialStep: OnboardingStep? = nil,
+        initialRestartFeedback: String? = nil,
         startsPolling: Bool,
         onForcedInitialStepPresented: (() -> Void)? = nil,
         onFinish: @escaping () -> Void
@@ -1974,6 +1982,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
             settingsStore: settingsStore,
             mode: mode,
             forcedInitialStep: forcedInitialStep,
+            initialRestartFeedback: initialRestartFeedback,
             onForcedInitialStepPresented: onForcedInitialStepPresented,
             onRestartPreparationCompleted: { [weak self] in
                 self?.suspendForRestart()

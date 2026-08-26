@@ -656,6 +656,70 @@ enum RecordingHUDLifecyclePolicy {
     }
 }
 
+/// AppKitへは一度だけreplyし、複数のQuit要求でも同じshutdown taskを共有する。
+@MainActor
+final class ApplicationTerminationCoordinator {
+    enum State: Equatable { case idle, shuttingDown, replied }
+
+    private(set) var state: State = .idle
+    private var shutdownTask: Task<Void, Never>?
+    private var timeoutTask: Task<Void, Never>?
+    private let shutdown: @MainActor () async -> Void
+    private let reply: @MainActor () -> Void
+    private let timeoutWarning: @MainActor () -> Void
+
+    init(
+        shutdown: @escaping @MainActor () async -> Void,
+        reply: @escaping @MainActor () -> Void,
+        timeoutWarning: @escaping @MainActor () -> Void
+    ) {
+        self.shutdown = shutdown
+        self.reply = reply
+        self.timeoutWarning = timeoutWarning
+    }
+
+    func request() -> NSApplication.TerminateReply {
+        switch state {
+        case .replied:
+            return .terminateNow
+        case .shuttingDown:
+            return .terminateLater
+        case .idle:
+            state = .shuttingDown
+            shutdownTask = Task { [weak self] in
+                guard let self else { return }
+                await self.shutdown()
+                self.replyOnce()
+            }
+            timeoutTask = Task { [weak self] in
+                do {
+                    try await Task.sleep(nanoseconds: 3_000_000_000)
+                } catch is CancellationError {
+                    return
+                } catch {
+                    return
+                }
+                guard let self else { return }
+                self.handleTimeout()
+            }
+            return .terminateLater
+        }
+    }
+
+    func replyOnce() {
+        guard state != .replied else { return }
+        state = .replied
+        timeoutTask?.cancel()
+        reply()
+    }
+
+    func handleTimeout() {
+        guard state != .replied else { return }
+        timeoutWarning()
+        replyOnce()
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     struct ModelReconnectFailure: LocalizedError {
@@ -755,6 +819,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var handsFreeSendTriggerTaskID: UUID?
     private var didWarmUp = false
     private var warmUpTask: Task<Void, Error>?
+    private lazy var terminationCoordinator = ApplicationTerminationCoordinator(
+        shutdown: { [weak self] in
+            guard let self else { return }
+            await self.audioRecorder.stop()
+            await self.cleanupEngine.shutdown()
+            await self.aiCommandEngine.shutdown()
+        },
+        reply: { NSApplication.shared.reply(toApplicationShouldTerminate: true) },
+        timeoutWarning: { AppLog.shared.warn("cleanupEngine.shutdownが3秒以内に完了しなかったため終了します") }
+    )
     private var consecutiveUnclassifiedRPCFailures = 0
     private static let unclassifiedRPCFailureWarningThreshold = 3
 
@@ -1584,35 +1658,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         hud.reassertFrontmostIfVisible()
     }
 
-    /// 子プロセス（codex app-server）のゾンビ化を防ぐため、shutdown完了までアプリの終了を保留する。
-    /// MainActor上でDispatchSemaphoreを使って同期的に待つと、shutdown内のcontinuation resumeが
-    /// MainActorへhopする必要がある場合にデッドロックするため、`.terminateLater` + 非同期replyへ変更。
-    /// 万一shutdownが長引いた場合に備え、3秒後に強制replyするタイムアウト保険も並走させる
-    /// （二重replyを防ぐためフラグで排他制御する）。
+    /// 子プロセスのshutdownとAppKit replyは単一のstate machineへ集約する。
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if OnboardingRuntimeProfile.isDebug {
             return .terminateNow
         }
-        var didReply = false
-
-        Task {
-            await audioRecorder.stop()
-            await cleanupEngine.shutdown()
-            await aiCommandEngine.shutdown()
-            guard !didReply else { return }
-            didReply = true
-            NSApplication.shared.reply(toApplicationShouldTerminate: true)
-        }
-
-        Task {
-            try? await Task.sleep(nanoseconds: 3_000_000_000)
-            guard !didReply else { return }
-            didReply = true
-            AppLog.shared.warn("cleanupEngine.shutdownが3秒以内に完了しなかったため強制終了します")
-            NSApplication.shared.reply(toApplicationShouldTerminate: true)
-        }
-
-        return .terminateLater
+        return terminationCoordinator.request()
     }
 
     // MARK: - 録音パイプライン

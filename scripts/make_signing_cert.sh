@@ -10,6 +10,10 @@
 # メッセージを出してスキップする。
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
+# shellcheck source=lib/install_checks.sh
+source "$SCRIPT_DIR/lib/install_checks.sh"
+
 CERT_NAME="Koedex Dev"
 NON_INTERACTIVE=0
 INTERACTIVE_HELP=0
@@ -23,10 +27,20 @@ for arg in "$@"; do
 done
 
 existing_hash() {
-  security find-identity -v -p codesigning | grep "\"$CERT_NAME\"" | head -1 | awk '{print $2}'
+  local output status
+  output="$(security find-identity -v -p codesigning 2>&1)"; status=$?
+  [[ $status -eq 0 ]] || return "$status"
+  printf '%s\n' "$output" | awk -v certificate_name="$CERT_NAME" \
+    'index($0, "\"" certificate_name "\"") && $2 ~ /^[[:xdigit:]]{40}$/ { print toupper($2); exit }'
 }
 
 # codesigning用アイデンティティ（信頼済み）として既に使える場合。
+KEYCHAIN_STATE="$(koedex_keychain_state)"
+if [[ "$KEYCHAIN_STATE" == inaccessible ]]; then
+  echo '=== 失敗: Keychainにアクセスできません ===' >&2
+  echo '証明書なしとして扱わず、Keychainを解除してから再実行してください。' >&2
+  exit 1
+fi
 HASH="$(existing_hash || true)"
 if [[ -n "$HASH" ]]; then
   echo "=== 証明書 \"$CERT_NAME\" は既に存在し、信頼設定済みです ==="
@@ -80,35 +94,12 @@ fi
 # macOS標準の/usr/bin/opensslはLibreSSLで、-legacy等のOpenSSL 3専用オプションを解さない。
 # 事前に実体を判定し、OpenSSL 3でなければ代替パスを探す。見つからなければ、40行以上の
 # usageダンプをユーザーに見せる前に、ここで日本語メッセージを出して停止する。
-is_openssl3() {
-  "$1" version 2>/dev/null | grep -q "OpenSSL 3"
-}
-
-find_openssl3() {
-  local candidate brew_prefix
-  brew_prefix="$(brew --prefix openssl@3 2>/dev/null || true)"
-  for candidate in \
-    "${brew_prefix:+$brew_prefix/bin/openssl}" \
-    "/opt/homebrew/opt/openssl@3/bin/openssl" \
-    "/usr/local/opt/openssl@3/bin/openssl"; do
-    [[ -n "$candidate" && -x "$candidate" ]] || continue
-    printf '%s\n' "$candidate"
-    return 0
-  done
-  return 1
-}
-
-OPENSSL_BIN="openssl"
-if ! is_openssl3 "$OPENSSL_BIN"; then
-  if OPENSSL3_PATH="$(find_openssl3)"; then
-    OPENSSL_BIN="$OPENSSL3_PATH"
-  else
-    echo "=== 失敗: OpenSSL 3が見つかりません ===" >&2
-    echo "macOS標準のopensslはLibreSSLで、証明書作成に必要な -legacy オプションを解しません。" >&2
-    echo "以下を実行してOpenSSL 3を導入してから再実行してください:" >&2
-    echo "  brew install openssl@3" >&2
-    exit 1
-  fi
+if ! OPENSSL_BIN="$(koedex_find_openssl3)"; then
+  echo "=== 失敗: OpenSSL 3が見つかりません ===" >&2
+  echo "候補はPATHと既知のHomebrew場所について実体の version 出力で検証しました。" >&2
+  echo "以下を実行してOpenSSL 3を導入してから再実行してください:" >&2
+  echo "  brew install openssl@3" >&2
+  exit 1
 fi
 
 # 自己署名コード署名証明書を自動生成する。

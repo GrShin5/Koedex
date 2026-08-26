@@ -1277,9 +1277,7 @@ If an imported term matches an existing one, you choose per entry from:
 
 ## 11. Menu bar
 
-![Menu bar menu](images/ja/menubar.png)
-
-(screenshot shows the Japanese interface)
+![Menu bar menu](images/en/menubar.png)
 
 Koedex lives in the menu bar at the top right of your screen, and **it also shows an icon
 in the Dock**. Click the microphone icon to open the menu. Even if you close every window,
@@ -1999,8 +1997,10 @@ Codex CLI you installed there is ready to use as-is (Method 2).
 
 ### What an AI agent can't do for you
 
-The following three things **must always be done by you personally.** macOS's security
-model intentionally prevents these from being automated.
+These are common examples that **need your confirmation or personal action.** Missing
+prerequisites are reported in one batch, but safety-sensitive actions are still confirmed
+immediately before they happen. Your environment may also require sandbox or network
+approval, so the number of pauses is not fixed.
 
 | Can't be automated | Explanation |
 | --- | --- |
@@ -2011,6 +2011,18 @@ model intentionally prevents these from being automated.
 The AI agent will tell you "your action is needed here" and pause. When it does, follow the
 on-screen instructions, then tell it you're done.
 
+### Working location and recommended model
+
+Use `~/Developer` as the default parent folder and make the new clone at
+`~/Developer/Koedex`. Only use `~/Downloads/Koedex` if Developer cannot be used. Avoid
+Desktop, Documents, iCloud Drive, File Provider locations, symlinks, and old clones.
+
+As of 2026-08-24, the recommended installer agent is Codex `GPT-5.6-Terra` / `medium`, or
+Claude Code `Sonnet 5` / `medium` when available and `default` / `medium` otherwise. Use the
+client default if effort cannot be selected. Check Claude Code's current availability and
+configuration in its [official model documentation](https://code.claude.com/docs/en/model-config).
+This setting is for the agent doing the installation, not Koedex's in-app AI model.
+
 ### Method 1: Using a desktop AI agent
 
 Steps for when you're using "an AI agent that can work directly with folders on your Mac
@@ -2020,15 +2032,15 @@ and run commands on it."
 
 | # | Check |
 | --- | --- |
-| 1 | Can it be pointed at a working folder (for example, your Downloads folder)? |
+| 1 | Can it be pointed at the working folder `~/Developer`? |
 | 2 | Can it run commands inside that folder? |
 
 If either is missing, use "Method 2: Using a terminal AI agent" below instead.
 
 #### Steps for a desktop AI agent
 
-1. In the AI agent's interface, point it at a working folder (for example, your Downloads
-   folder).
+1. In the AI agent's interface, point it at `~/Developer`. Create that folder if needed.
+   Only use `~/Downloads` if Developer cannot be selected.
 2. Copy the entire copy-paste prompt below, paste it in, and ask it to run.
 3. If it asks you to confirm before running something, read it and approve.
 4. If it asks for a macOS permission dialog, Keychain approval, or an administrator
@@ -2044,7 +2056,8 @@ Steps for when you're using an AI agent from Terminal.
 2. Move to a working folder. If you don't have a preference, type this and press `return`:
 
    ```bash
-   cd ~/Downloads
+   mkdir -p ~/Developer
+   cd ~/Developer
    ```
 
 3. Type this and press `return`. Codex launches.
@@ -2064,7 +2077,8 @@ Steps for when you're using an AI agent from Terminal.
 2. Move to a working folder.
 
    ```bash
-   cd ~/Downloads
+   mkdir -p ~/Developer
+   cd ~/Developer
    ```
 
 3. Type this and press `return`.
@@ -2079,46 +2093,104 @@ Steps for when you're using an AI agent from Terminal.
 ### Copy-paste prompt
 
 Koedex's official repository is <https://github.com/GrShin5/Koedex>.
-Use the following URL exactly as written.
+Use the following URL, tag, and full SHA exactly as written.
 
+> Removing an older Koedex.app may leave previous macOS permissions such as Microphone or
+> Accessibility, and an older signing certificate can remain too. The agent does not reset
+> TCC or automatically remove old certificates or app data. Follow macOS only if it asks you
+> to grant permission again.
+
+<!-- BEGIN KOEDEX_AGENT_INSTALL_PROMPT_EN -->
 ```text
-I want to build and install a macOS app called Koedex from source. I'm not comfortable
-with the Terminal, so please walk me through the following steps, in order.
+Build and install the Koedex macOS app from its official GitHub repository. I am not
+comfortable with Terminal. Explain each action in plain English, including exactly what I
+need to look for or click, instead of asking me questions that only use engineering terms.
 
-WHAT I NEED YOU TO DO
-Work inside a working folder (for example, your Downloads folder).
-1. Clone the following repository into the folder we're currently in:
-   https://github.com/GrShin5/Koedex.git
-2. Move into the cloned folder.
-3. Check whether the build prerequisites are in place:
-   - Xcode Command Line Tools is installed
-   - Swift 6.2 or later is available (check with swift --version)
-   If anything is missing, don't install it yourself -- tell me what's missing and stop.
-4. Run this command to create a self-signed signing certificate:
-   bash scripts/make_signing_cert.sh
-   After this, I will need to trust the certificate in Keychain. Explain in English what
-   I need to do, and wait for me to finish.
-5. Build the app with this command:
-   ./scripts/make_app.sh release
-   On success, this creates dist/Koedex.app.
-6. Move the resulting Koedex.app into /Applications.
-7. Finally, explain in English how to get past macOS's block the first time the app opens.
+PINNED SOURCE
+- Official URL: https://github.com/GrShin5/Koedex.git
+- Release tag: v0.1.5
+- Verification method: GitHub immutable release
 
-CONSTRAINTS YOU MUST FOLLOW
-- Only run scripts that are part of this repository. Never run a script obtained from
-  outside the repository.
-- Never modify anything under ~/.codex/.
-- If Codex CLI isn't installed, don't install it yourself -- tell me what's missing and
-  stop.
-- If Koedex.app already exists in /Applications, don't overwrite or delete it without
-  asking -- tell me you found it and stop.
-- Don't delete files or change settings I haven't asked about.
-- Before each step, explain in English what you're about to do, then do it.
-- If anything fails, don't try a different approach on your own. Stop and report in
-  English what happened.
-- You cannot handle macOS permission dialogs, Keychain approval, or administrator password
-  entry for me. When one of these comes up, explain what I need to do and pause.
+WORKING LOCATION
+1. Use ~/Developer as the default parent and ~/Developer/Koedex as the clone destination.
+2. Only if ~/Developer cannot be created or used, offer ~/Downloads/Koedex instead.
+3. Do not work in Desktop, Documents, iCloud Drive, another File Provider location, or
+   through a symlink.
+4. If the destination already exists, contains anything, is a symlink, or is an existing
+   clone with uncommitted changes, do not delete, overwrite, or reuse it. Report its location
+   and state in plain language, then stop.
+
+HOW TO PROCEED
+- Complete all read-only preflight checks first, then report every finding and all action I
+  need to take in one batch. Do not interrupt me once per finding.
+- Still ask immediately before a safety-sensitive action such as changing Keychain,
+  writing to /Applications, handling Gatekeeper, or granting macOS permissions. Explain
+  what will change and wait for my approval. Do not promise a fixed number of pauses.
+- If sandbox or network approval caused a command to fail, after approval you may retry the
+  same URL, ref, and command once. Do not independently switch to another URL, ref, mirror,
+  ZIP download, or installation method.
+
+FETCH AND VERIFY
+1. Clone v0.1.5 into the new destination using a command equivalent to:
+   git clone --branch v0.1.5 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
+2. Before running any repository script, verify all of the following:
+   - origin's fetch URL matches https://github.com/GrShin5/Koedex.git
+     (you may treat only a trailing .git as equivalent during comparison)
+   - the local v0.1.5 tag's commit exactly equals HEAD
+   - refs/tags/v0.1.5 returned by git ls-remote against the official URL exactly equals HEAD
+   - GitHub's official releases/tags/v0.1.5 API reports tag_name=v0.1.5 and immutable=true
+   - if GitHub CLI is already available, gh release verify v0.1.5 --repo GrShin5/Koedex also succeeds
+   - the checkout is clean and has no untracked files
+3. If any value differs, the release is missing or not immutable, or a value cannot be
+   verified, do not run a repository script. Report the values you could verify in a table
+   and stop.
+
+PREFLIGHT
+Only after every source check passes, run this inside the clone:
+  KOEDEX_LANG=en bash scripts/preflight.sh --install
+Review the complete output for macOS, Swift, Command Line Tools, Codex CLI, OpenSSL 3,
+Keychain, free disk space, working location, and /Applications/Koedex.app. Report every
+PASS/WARN/FAIL in one batch. Do not treat an inaccessible Keychain as an absent certificate
+or a broken signature. If /Applications/Koedex.app exists as an app, regular file, or
+symlink, do not overwrite or delete it; stop.
+
+BUILD AND INSTALL
+1. Only if a signing identity is absent, explain before running
+   bash scripts/make_signing_cert.sh that it creates a self-signed code-signing certificate,
+   imports it into the login Keychain, and marks it Always Trust for code signing, which
+   triggers a macOS authentication dialog. Wait for my approval.
+2. After approval, run that script and verify success. If Keychain is inaccessible, do not
+   recreate or delete anything; stop.
+3. Run ./scripts/make_app.sh release.
+4. Verify exit status zero, dist/Koedex.app exists, bundle ID is com.koedex.app, its deep
+   strict signature is valid, and its signer fingerprint can be read.
+5. Before running bash scripts/install_app.sh, explain that it makes a new installation from
+   dist/Koedex.app to /Applications and never overwrites an existing Koedex.app. Wait for my
+   approval.
+6. After approval, run bash scripts/install_app.sh with no arguments. Do not switch to a
+   manual copy or alternate destination.
+7. Verify the installed bundle ID, deep strict signature, signer fingerprint, and identity
+   continuity with the source app, then report the results.
+
+DO NOT CHANGE
+- Do not modify anything under ~/.codex/ and do not reset TCC permissions.
+- Do not automatically delete an existing app, old certificate, Keychain item, Koedex
+  settings, or history.
+- Do not fetch or run scripts from outside the repository or install new software on your
+  own.
+- Do not independently use sudo, delete or overwrite files, disable Gatekeeper, or broadly
+  remove quarantine attributes.
+
+FINAL REPORT
+1. Working location and the verified origin, tag, and HEAD
+2. Every preflight, build, install, and signature PASS/WARN/FAIL
+3. Safe first launch in Finder and what to do if Gatekeeper blocks it
+4. How to grant Microphone, Speech Recognition, and Accessibility permissions
+5. How to verify the Codex CLI connection and what to do if it is unavailable
+6. State that old macOS permissions or signing records can remain after deleting an older
+   app, and that you did not automatically reset or delete them
 ```
+<!-- END KOEDEX_AGENT_INSTALL_PROMPT_EN -->
 
 ### After the agent finishes
 
@@ -2239,8 +2311,8 @@ Once it launches, continue with [6. First-time setup](#6-first-time-setup).
 
 | Item | Detail |
 | --- | --- |
-| Release covered | v0.1.4 |
-| App version covered | 0.1.4 |
+| Release covered | v0.1.5 |
+| App version covered | 0.1.5 |
 | Manual language | English |
 
 This manual was written against the source code in the release above. Newer versions may
