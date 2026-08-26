@@ -25,10 +25,10 @@ Include as much detail as you can:
 
 ## Supported versions
 
-Koedex publishes release tags (`v0.1.0` onward) but does not yet have a formal
-support matrix. Only the latest commit on the default branch is supported.
-Please reproduce against a fresh build from the latest release tag, or from
-`main`, before reporting.
+Koedex publishes a release tag for each version (`v0.1.0` onward) but does not
+yet have a formal support matrix. Only the latest published release is
+supported. Please reproduce against a fresh build from that release tag,
+obtained and verified the way the README describes, before reporting.
 
 ## Response window
 
@@ -53,7 +53,7 @@ text-injection/clipboard handling, prompt construction sent to
 ## Known limitations
 
 Koedex is an early public release. The following are already known and are on
-the list to address after release; the first and third are also described for
+the list to address after release; all but the second are also described for
 users in the README and the manual. **Please do not spend your time writing
 them up as new reports** — a
 report that adds a concrete attack path, a working reproduction, or a case
@@ -78,3 +78,16 @@ outside what is described here is very welcome.
   re-derive the delivery target from the user's speech. Automatically pressing
   Return after delivery exists only in hands-free send for ordinary voice
   input; it is never reachable from AI command mode.
+- **A selection captured through the clipboard fallback is left on the
+  clipboard whenever the capture is abandoned after the copy has landed.**
+  Secure input turning on, the focused target changing, and task cancellation
+  all take this path. The text is never used, but the previous pasteboard
+  contents are not restored, so the copied selection stays readable by anything
+  that can read the pasteboard.
+- **The delivery paths that route through the pasteboard can lose the user's
+  prior clipboard contents.** Clipboard mode, and the support-only scoped
+  fallback for Mail and Google Docs in Chrome, both replace the pasteboard in
+  order to paste; a failure partway reports that the previous contents may have
+  been lost rather than restored. Both are off by default, and the scoped
+  fallback additionally requires the `--support-scoped-clipboard-fallback`
+  support flag.

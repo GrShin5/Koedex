@@ -1347,6 +1347,16 @@ OpenAI と通信します。
 > **注意**：選択した文章や Web 検索の結果は AI へ送られ、AI がその回答をどこへ出すかにも
 > 影響し得ます。結果を鵜呑みにせず、必ず内容を確認してからご利用ください。
 
+> **注意**：読み取りのために選択範囲をコピーしたあと、取り込みが中止された場合、コピーされた
+> 文章がクリップボードに残ります。「セキュア入力」が有効になった場合、フォーカスが別の場所へ
+> 移った場合、処理が取り消された場合のいずれでも起こります。Koedex はその文章を使いませんが、
+> 元のクリップボードの内容を戻すことはできません。
+
+> **注意**：クリップボードを経由する挿入経路では、それまでの内容が失われることがあります。
+> クリップボードモードと、サポート専用の Mail・Chrome 版 Google ドキュメント向け代替手段は、
+> 貼り付けのためにクリップボードを差し替えます。その途中で失敗した場合、以前の内容は
+> 復元されない可能性があります。どちらも、ご自身で有効にしない限り OFF です。
+
 #### Codex CLI の設定には触れません
 
 Koedex は `codex` を起動するときに `mcp_servers={}` `plugins={}` を指定します。
@@ -2070,7 +2080,7 @@ KoedexというmacOSアプリを、公式GitHubリポジトリから取得して
 
 【固定する取得元】
 - 公式URL: https://github.com/GrShin5/Koedex.git
-- リリースタグ: v0.1.5
+- リリースタグ: v0.1.6
 - 検証方式: GitHub immutable release
 
 【作業場所】
@@ -2091,15 +2101,15 @@ KoedexというmacOSアプリを、公式GitHubリポジトリから取得して
   独断で切り替えないでください。
 
 【取得と照合】
-1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.5をcloneしてください。
-   git clone --branch v0.1.5 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
+1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.6をcloneしてください。
+   git clone --branch v0.1.6 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
 2. clone直後、スクリプトを1つも実行する前に、次をすべて確認してください。
    - originのfetch URLが https://github.com/GrShin5/Koedex.git と一致する
      （比較時だけ末尾の.gitの有無を同一視して構いません）
-   - ローカルのv0.1.5 tagが指すcommitとHEADが完全一致する
-   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.5もHEADと完全一致する
-   - GitHub公式APIのreleases/tags/v0.1.5が、tag_name=v0.1.5かつimmutable=trueを返す
-   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.5 --repo GrShin5/Koedexも成功する
+   - ローカルのv0.1.6 tagが指すcommitとHEADが完全一致する
+   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.6もHEADと完全一致する
+   - GitHub公式APIのreleases/tags/v0.1.6が、tag_name=v0.1.6かつimmutable=trueを返す
+   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.6 --repo GrShin5/Koedexも成功する
    - checkoutがcleanで、未追跡ファイルもない
 3. 1つでも一致しない、releaseが存在しない・immutableでない、取得結果を確認できない、
    別refへ誘導された場合は、
@@ -2184,13 +2194,54 @@ swift --version
 
 ### 手順1：リポジトリを clone する
 
-Koedex の公式リポジトリを clone します。
+<!-- BEGIN KOEDEX_SOURCE_PIN_JA -->
+公式リポジトリから、リリース `v0.1.6` の一点だけを clone します。最新の状態（`main`）ではなく、
+この版だけを取得してください。`Koedex` という名前のフォルダが既にある場所では実行しないでください。
 
 ```bash
-git clone https://github.com/GrShin5/Koedex.git
+git clone --branch v0.1.6 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+  && cd Koedex
 ```
 
-clone してできたフォルダへ移動します。
+**次の照合がすべて ✅ になるまで、リポジトリ内のスクリプトを1つも実行しないでください。**
+clone してできたフォルダの中で、以下をそのまま貼り付けて実行します。
+
+```bash
+export GIT_TERMINAL_PROMPT=0
+OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
+EXPECTED_TAG="v0.1.6"
+ok=1
+fail() { echo "❌ $1"; ok=0; }
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+  && echo "✅ clone したフォルダの中にいる" || fail "clone したフォルダの中にいない"
+origin_url="$(git remote get-url origin 2>/dev/null)"
+[ -n "$origin_url" ] && [ "${origin_url%.git}" = "${OFFICIAL_URL%.git}" ] \
+  && echo "✅ 取得元URLが公式と一致" || fail "取得元URLが公式と不一致"
+head_sha="$(git rev-parse HEAD 2>/dev/null)"
+tag_sha="$(git rev-parse "${EXPECTED_TAG}^{commit}" 2>/dev/null)"
+[ -n "$head_sha" ] && [ "$tag_sha" = "$head_sha" ] \
+  && echo "✅ ローカルの ${EXPECTED_TAG} と HEAD が一致" || fail "ローカルの ${EXPECTED_TAG} と HEAD が不一致"
+remote_sha="$(git ls-remote "$OFFICIAL_URL" "refs/tags/${EXPECTED_TAG}^{}" 2>/dev/null | cut -f1)"
+[ -n "$remote_sha" ] || remote_sha="$(git ls-remote "$OFFICIAL_URL" "refs/tags/${EXPECTED_TAG}" 2>/dev/null | cut -f1)"
+[ -n "$remote_sha" ] && [ -n "$head_sha" ] && [ "$remote_sha" = "$head_sha" ] \
+  && echo "✅ GitHub上の ${EXPECTED_TAG} と HEAD が一致" || fail "GitHub上の ${EXPECTED_TAG} を確認できないか HEAD と不一致"
+status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
+[ "$status_rc" = 0 ] && [ -z "$status_out" ] \
+  && echo "✅ 作業ツリーに変更も未追跡ファイルも無い" || fail "作業ツリーが clean でないか確認できない"
+[ "$ok" = 1 ] && echo "→ すべて一致しました。次へ進めます。" \
+              || echo "→ 一致しない項目があります。ここで中止してください。"
+```
+
+❌ が1つでも出たら、そこで中止してください。別のURL、別のタグ、ZIPダウンロード、ミラーなど、
+別の取得方法へ切り替えないでください。
+
+タグはあとから移動されうるため、GitHub の Releases 画面で `v0.1.6` が immutable release として
+公開されていることも確認してください。GitHub CLI を使える場合は、次のコマンドでも確認できます。
+
+```bash
+gh release verify v0.1.6 --repo GrShin5/Koedex
+```
+<!-- END KOEDEX_SOURCE_PIN_JA -->
 
 ### 手順2：署名用の証明書を作る（初回のみ）
 
@@ -2268,8 +2319,8 @@ swift build
 
 | 項目 | 内容 |
 | --- | --- |
-| 対象リリース | v0.1.5 |
-| 対象アプリバージョン | 0.1.5 |
+| 対象リリース | v0.1.6 |
+| 対象アプリバージョン | 0.1.6 |
 | 説明書の言語 | 日本語 |
 
 この説明書は、上記のリリース時点のソースコードをもとに書かれています。

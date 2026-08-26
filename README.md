@@ -89,6 +89,16 @@ communication channel. See [NOTICE](NOTICE) for the full notice.
 - **Selected text and web-search results are sent to the AI, and they can
   also influence where the AI decides to put its answer.** Always look at
   the result before relying on it.
+- **When Koedex has to copy your selection to read it and the capture is then
+  abandoned, the copied text stays on the clipboard.** Secure input turning on,
+  the focus moving elsewhere, and the request being cancelled all do this.
+  Koedex never uses the text, but it cannot put your previous clipboard
+  contents back.
+- **The delivery paths that go through the clipboard can lose what was on it.**
+  Clipboard mode, and the support-only fallback for Mail and Google Docs in
+  Chrome, replace the clipboard in order to paste; if that fails partway, your
+  previous contents may be lost rather than restored. Both are off unless you
+  turn them on yourself.
 
 ## Install
 
@@ -121,6 +131,58 @@ If signing fails with `resource fork, Finder information, or similar detritus
 not allowed`, clone again outside the synced folder. **Moving (`mv`) leaves the
 extended attributes in place, so it does not fix the problem.**
 
+#### Get the source
+
+<!-- BEGIN KOEDEX_SOURCE_PIN_EN -->
+Clone only the single point tagged `v0.1.6` from the official repository. Do not take the latest
+state (`main`) — take this release and nothing else. Do not run this where a folder named `Koedex`
+already exists.
+
+```bash
+git clone --branch v0.1.6 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+  && cd Koedex
+```
+
+**Do not run a single script from the repository until every check below prints ✅.**
+Inside the folder the clone created, paste and run the following as-is.
+
+```bash
+export GIT_TERMINAL_PROMPT=0
+OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
+EXPECTED_TAG="v0.1.6"
+ok=1
+fail() { echo "❌ $1"; ok=0; }
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+  && echo "✅ you are inside the cloned folder" || fail "you are not inside the cloned folder"
+origin_url="$(git remote get-url origin 2>/dev/null)"
+[ -n "$origin_url" ] && [ "${origin_url%.git}" = "${OFFICIAL_URL%.git}" ] \
+  && echo "✅ origin URL matches the official URL" || fail "origin URL does not match"
+head_sha="$(git rev-parse HEAD 2>/dev/null)"
+tag_sha="$(git rev-parse "${EXPECTED_TAG}^{commit}" 2>/dev/null)"
+[ -n "$head_sha" ] && [ "$tag_sha" = "$head_sha" ] \
+  && echo "✅ local ${EXPECTED_TAG} matches HEAD" || fail "local ${EXPECTED_TAG} does not match HEAD"
+remote_sha="$(git ls-remote "$OFFICIAL_URL" "refs/tags/${EXPECTED_TAG}^{}" 2>/dev/null | cut -f1)"
+[ -n "$remote_sha" ] || remote_sha="$(git ls-remote "$OFFICIAL_URL" "refs/tags/${EXPECTED_TAG}" 2>/dev/null | cut -f1)"
+[ -n "$remote_sha" ] && [ -n "$head_sha" ] && [ "$remote_sha" = "$head_sha" ] \
+  && echo "✅ ${EXPECTED_TAG} on GitHub matches HEAD" || fail "${EXPECTED_TAG} on GitHub is unreachable or does not match HEAD"
+status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
+[ "$status_rc" = 0 ] && [ -z "$status_out" ] \
+  && echo "✅ working tree has no changes and no untracked files" || fail "working tree is not clean, or could not be checked"
+[ "$ok" = 1 ] && echo "-> Everything matches. You can continue." \
+              || echo "-> Something does not match. Stop here."
+```
+
+If even one ❌ appears, stop there. Do not switch to a different URL, a different tag, a ZIP
+download, a mirror, or any other way of obtaining the source.
+
+A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.6` is published as
+an immutable release. If you have the GitHub CLI, you can confirm the same thing with:
+
+```bash
+gh release verify v0.1.6 --repo GrShin5/Koedex
+```
+<!-- END KOEDEX_SOURCE_PIN_EN -->
+
 #### Preflight check
 
 Running the following before you build checks every prerequisite at once. If
@@ -138,7 +200,7 @@ KOEDEX_LANG=en bash scripts/preflight.sh
 ```
 
 ```bash
-# From a clone of this repository:
+# Inside the verified clone:
 
 # Build the executable only
 swift build

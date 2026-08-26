@@ -1373,6 +1373,16 @@ account.**
 > influence where the AI decides to place its answer. Always check the result before
 > relying on it.
 
+> **Note**: When Koedex has to copy your selection in order to read it and the capture is
+> then abandoned, the copied text stays on the clipboard. Secure input turning on, the
+> focus moving elsewhere, and the request being cancelled all do this. Koedex never uses
+> the text, but it cannot put your previous clipboard contents back.
+
+> **Note**: The delivery paths that go through the clipboard can lose what was on it.
+> Clipboard mode, and the support-only fallback for Mail and Google Docs in Chrome,
+> replace the clipboard in order to paste; if that fails partway, your previous contents
+> may be lost rather than restored. Both are off unless you turn them on yourself.
+
 #### Koedex never touches Codex CLI's own configuration
 
 When Koedex launches `codex`, it passes `mcp_servers={}` and `plugins={}`. It never
@@ -2108,7 +2118,7 @@ need to look for or click, instead of asking me questions that only use engineer
 
 PINNED SOURCE
 - Official URL: https://github.com/GrShin5/Koedex.git
-- Release tag: v0.1.5
+- Release tag: v0.1.6
 - Verification method: GitHub immutable release
 
 WORKING LOCATION
@@ -2131,15 +2141,15 @@ HOW TO PROCEED
   ZIP download, or installation method.
 
 FETCH AND VERIFY
-1. Clone v0.1.5 into the new destination using a command equivalent to:
-   git clone --branch v0.1.5 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
+1. Clone v0.1.6 into the new destination using a command equivalent to:
+   git clone --branch v0.1.6 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
 2. Before running any repository script, verify all of the following:
    - origin's fetch URL matches https://github.com/GrShin5/Koedex.git
      (you may treat only a trailing .git as equivalent during comparison)
-   - the local v0.1.5 tag's commit exactly equals HEAD
-   - refs/tags/v0.1.5 returned by git ls-remote against the official URL exactly equals HEAD
-   - GitHub's official releases/tags/v0.1.5 API reports tag_name=v0.1.5 and immutable=true
-   - if GitHub CLI is already available, gh release verify v0.1.5 --repo GrShin5/Koedex also succeeds
+   - the local v0.1.6 tag's commit exactly equals HEAD
+   - refs/tags/v0.1.6 returned by git ls-remote against the official URL exactly equals HEAD
+   - GitHub's official releases/tags/v0.1.6 API reports tag_name=v0.1.6 and immutable=true
+   - if GitHub CLI is already available, gh release verify v0.1.6 --repo GrShin5/Koedex also succeeds
    - the checkout is clean and has no untracked files
 3. If any value differs, the release is missing or not immutable, or a value cannot be
    verified, do not run a repository script. Report the values you could verify in a table
@@ -2226,13 +2236,55 @@ swift --version
 
 ### Step 1: Clone the repository
 
-Clone Koedex's official repository.
+<!-- BEGIN KOEDEX_SOURCE_PIN_EN -->
+Clone only the single point tagged `v0.1.6` from the official repository. Do not take the latest
+state (`main`) — take this release and nothing else. Do not run this where a folder named `Koedex`
+already exists.
 
 ```bash
-git clone https://github.com/GrShin5/Koedex.git
+git clone --branch v0.1.6 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+  && cd Koedex
 ```
 
-Move into the folder created by the clone.
+**Do not run a single script from the repository until every check below prints ✅.**
+Inside the folder the clone created, paste and run the following as-is.
+
+```bash
+export GIT_TERMINAL_PROMPT=0
+OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
+EXPECTED_TAG="v0.1.6"
+ok=1
+fail() { echo "❌ $1"; ok=0; }
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+  && echo "✅ you are inside the cloned folder" || fail "you are not inside the cloned folder"
+origin_url="$(git remote get-url origin 2>/dev/null)"
+[ -n "$origin_url" ] && [ "${origin_url%.git}" = "${OFFICIAL_URL%.git}" ] \
+  && echo "✅ origin URL matches the official URL" || fail "origin URL does not match"
+head_sha="$(git rev-parse HEAD 2>/dev/null)"
+tag_sha="$(git rev-parse "${EXPECTED_TAG}^{commit}" 2>/dev/null)"
+[ -n "$head_sha" ] && [ "$tag_sha" = "$head_sha" ] \
+  && echo "✅ local ${EXPECTED_TAG} matches HEAD" || fail "local ${EXPECTED_TAG} does not match HEAD"
+remote_sha="$(git ls-remote "$OFFICIAL_URL" "refs/tags/${EXPECTED_TAG}^{}" 2>/dev/null | cut -f1)"
+[ -n "$remote_sha" ] || remote_sha="$(git ls-remote "$OFFICIAL_URL" "refs/tags/${EXPECTED_TAG}" 2>/dev/null | cut -f1)"
+[ -n "$remote_sha" ] && [ -n "$head_sha" ] && [ "$remote_sha" = "$head_sha" ] \
+  && echo "✅ ${EXPECTED_TAG} on GitHub matches HEAD" || fail "${EXPECTED_TAG} on GitHub is unreachable or does not match HEAD"
+status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
+[ "$status_rc" = 0 ] && [ -z "$status_out" ] \
+  && echo "✅ working tree has no changes and no untracked files" || fail "working tree is not clean, or could not be checked"
+[ "$ok" = 1 ] && echo "-> Everything matches. You can continue." \
+              || echo "-> Something does not match. Stop here."
+```
+
+If even one ❌ appears, stop there. Do not switch to a different URL, a different tag, a ZIP
+download, a mirror, or any other way of obtaining the source.
+
+A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.6` is published as
+an immutable release. If you have the GitHub CLI, you can confirm the same thing with:
+
+```bash
+gh release verify v0.1.6 --repo GrShin5/Koedex
+```
+<!-- END KOEDEX_SOURCE_PIN_EN -->
 
 ### Step 2: Create a signing certificate (first time only)
 
@@ -2311,8 +2363,8 @@ Once it launches, continue with [6. First-time setup](#6-first-time-setup).
 
 | Item | Detail |
 | --- | --- |
-| Release covered | v0.1.5 |
-| App version covered | 0.1.5 |
+| Release covered | v0.1.6 |
+| App version covered | 0.1.6 |
 | Manual language | English |
 
 This manual was written against the source code in the release above. Newer versions may

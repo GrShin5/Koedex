@@ -73,6 +73,14 @@ Koedexは独立したコミュニティプロジェクトです。**OpenAIと提
   文章を選択した状態のまま「AIに指示」を開始しないでください。
 - **選択した文章やWeb検索結果はAIへ送られ、AIがどこに回答を置くかにも影響し得ます。**
   結果を鵜呑みにせず、必ず内容を確認してから利用してください。
+- **読み取りのために選択範囲をコピーしたあと、取り込みが中止された場合、コピーされた文章が
+  クリップボードに残ります。** 「セキュア入力」が有効になった場合、フォーカスが別の場所へ
+  移った場合、処理が取り消された場合のいずれでも起こります。Koedexはその文章を使いませんが、
+  元のクリップボードの内容を戻すことはできません。
+- **クリップボードを経由する挿入経路では、それまでの内容が失われることがあります。**
+  クリップボードモードと、サポート専用のMail・Chrome版Googleドキュメント向け代替手段は、
+  貼り付けのためにクリップボードを差し替えます。その途中で失敗した場合、以前の内容は
+  復元されない可能性があります。どちらも、ご自身で有効にしない限りOFFです。
 
 ## インストール
 
@@ -100,6 +108,57 @@ Claude CodeまたはCodex CLIに貼り付けるだけで導入できます。
 署名の段階で`resource fork, Finder information, or similar detritus not allowed`が出た場合は、
 同期対象外の場所へcloneし直してください。**移動（`mv`）では拡張属性がそのまま残るため解決しません。**
 
+#### ソースを取得する
+
+<!-- BEGIN KOEDEX_SOURCE_PIN_JA -->
+公式リポジトリから、リリース `v0.1.6` の一点だけを clone します。最新の状態（`main`）ではなく、
+この版だけを取得してください。`Koedex` という名前のフォルダが既にある場所では実行しないでください。
+
+```bash
+git clone --branch v0.1.6 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+  && cd Koedex
+```
+
+**次の照合がすべて ✅ になるまで、リポジトリ内のスクリプトを1つも実行しないでください。**
+clone してできたフォルダの中で、以下をそのまま貼り付けて実行します。
+
+```bash
+export GIT_TERMINAL_PROMPT=0
+OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
+EXPECTED_TAG="v0.1.6"
+ok=1
+fail() { echo "❌ $1"; ok=0; }
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
+  && echo "✅ clone したフォルダの中にいる" || fail "clone したフォルダの中にいない"
+origin_url="$(git remote get-url origin 2>/dev/null)"
+[ -n "$origin_url" ] && [ "${origin_url%.git}" = "${OFFICIAL_URL%.git}" ] \
+  && echo "✅ 取得元URLが公式と一致" || fail "取得元URLが公式と不一致"
+head_sha="$(git rev-parse HEAD 2>/dev/null)"
+tag_sha="$(git rev-parse "${EXPECTED_TAG}^{commit}" 2>/dev/null)"
+[ -n "$head_sha" ] && [ "$tag_sha" = "$head_sha" ] \
+  && echo "✅ ローカルの ${EXPECTED_TAG} と HEAD が一致" || fail "ローカルの ${EXPECTED_TAG} と HEAD が不一致"
+remote_sha="$(git ls-remote "$OFFICIAL_URL" "refs/tags/${EXPECTED_TAG}^{}" 2>/dev/null | cut -f1)"
+[ -n "$remote_sha" ] || remote_sha="$(git ls-remote "$OFFICIAL_URL" "refs/tags/${EXPECTED_TAG}" 2>/dev/null | cut -f1)"
+[ -n "$remote_sha" ] && [ -n "$head_sha" ] && [ "$remote_sha" = "$head_sha" ] \
+  && echo "✅ GitHub上の ${EXPECTED_TAG} と HEAD が一致" || fail "GitHub上の ${EXPECTED_TAG} を確認できないか HEAD と不一致"
+status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
+[ "$status_rc" = 0 ] && [ -z "$status_out" ] \
+  && echo "✅ 作業ツリーに変更も未追跡ファイルも無い" || fail "作業ツリーが clean でないか確認できない"
+[ "$ok" = 1 ] && echo "→ すべて一致しました。次へ進めます。" \
+              || echo "→ 一致しない項目があります。ここで中止してください。"
+```
+
+❌ が1つでも出たら、そこで中止してください。別のURL、別のタグ、ZIPダウンロード、ミラーなど、
+別の取得方法へ切り替えないでください。
+
+タグはあとから移動されうるため、GitHub の Releases 画面で `v0.1.6` が immutable release として
+公開されていることも確認してください。GitHub CLI を使える場合は、次のコマンドでも確認できます。
+
+```bash
+gh release verify v0.1.6 --repo GrShin5/Koedex
+```
+<!-- END KOEDEX_SOURCE_PIN_JA -->
+
 #### 事前チェック
 
 ビルド前に以下を実行すると、必要な条件をまとめて確認できます。不足があれば、やるべきことが
@@ -110,7 +169,7 @@ bash scripts/preflight.sh
 ```
 
 ```bash
-# このリポジトリのクローンから実行します
+# 照合済みのクローンの中で実行します
 
 # 実行ファイルだけをビルド
 swift build
