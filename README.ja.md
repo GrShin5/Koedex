@@ -111,11 +111,11 @@ Claude CodeまたはCodex CLIに貼り付けるだけで導入できます。
 #### ソースを取得する
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_JA -->
-公式リポジトリから、リリース `v0.1.7` の一点だけを clone します。最新の状態（`main`）ではなく、
+公式リポジトリから、リリース `v0.1.8` の一点だけを clone します。最新の状態（`main`）ではなく、
 この版だけを取得してください。`Koedex` という名前のフォルダが既にある場所では実行しないでください。
 
 ```bash
-git clone --branch v0.1.7 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.1.8 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -125,7 +125,7 @@ clone してできたフォルダの中で、以下をそのまま貼り付け�
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.1.7"
+EXPECTED_TAG="v0.1.8"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -151,11 +151,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 ❌ が1つでも出たら、そこで中止してください。別のURL、別のタグ、ZIPダウンロード、ミラーなど、
 別の取得方法へ切り替えないでください。
 
-タグはあとから移動されうるため、GitHub の Releases 画面で `v0.1.7` が immutable release として
+タグはあとから移動されうるため、GitHub の Releases 画面で `v0.1.8` が immutable release として
 公開されていることも確認してください。GitHub CLI を使える場合は、次のコマンドでも確認できます。
 
 ```bash
-gh release verify v0.1.7 --repo GrShin5/Koedex
+gh release verify v0.1.8 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_JA -->
 
@@ -283,6 +283,9 @@ Koedexは、macOSの3つのプライバシー権限を必要とします。`dist
 `scripts/install_app.sh`は、`/Applications/Koedex.app`が既に存在する場合、上書きせずエラーで
 停止します。そのため更新は「まず旧アプリを退避し、空いた場所へ新しいアプリを入れる」という
 手順になります。
+
+AIエージェントに更新を任せる場合は、
+[docs/agent-update-prompt.md](docs/agent-update-prompt.md)のプロンプトをコピーして貼り付けてください。
 
 1. 現在インストールされているアプリを削除せず、退避します。
    `mv /Applications/Koedex.app ~/Desktop/Koedex-old.app`

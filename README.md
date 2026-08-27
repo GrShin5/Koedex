@@ -134,12 +134,12 @@ extended attributes in place, so it does not fix the problem.**
 #### Get the source
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_EN -->
-Clone only the single point tagged `v0.1.7` from the official repository. Do not take the latest
+Clone only the single point tagged `v0.1.8` from the official repository. Do not take the latest
 state (`main`) — take this release and nothing else. Do not run this where a folder named `Koedex`
 already exists.
 
 ```bash
-git clone --branch v0.1.7 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.1.8 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -149,7 +149,7 @@ Inside the folder the clone created, paste and run the following as-is.
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.1.7"
+EXPECTED_TAG="v0.1.8"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -175,11 +175,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 If even one ❌ appears, stop there. Do not switch to a different URL, a different tag, a ZIP
 download, a mirror, or any other way of obtaining the source.
 
-A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.7` is published as
+A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.8` is published as
 an immutable release. If you have the GitHub CLI, you can confirm the same thing with:
 
 ```bash
-gh release verify v0.1.7 --repo GrShin5/Koedex
+gh release verify v0.1.8 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_EN -->
 
@@ -328,6 +328,9 @@ until it restarts.
 `/Applications/Koedex.app` — it fails with an error rather than replacing
 anything there. So updating to a new release means: move the old app aside
 first, then install the new one into the now-empty spot.
+
+To let an agent perform this update, copy the prompt from
+[docs/agent-update-prompt.md](docs/agent-update-prompt.md).
 
 1. Move the currently installed app out of the way instead of deleting it:
    `mv /Applications/Koedex.app ~/Desktop/Koedex-old.app` (any destination
