@@ -88,7 +88,7 @@ enum RegressionTestSuite {
             TranscriptionError.assetInstallFailed(rawDiagnostics).localizedDescription,
             TranscriptionError.analyzerStartFailed(rawDiagnostics).localizedDescription,
             TranscriptionError.permissionNotGranted.localizedDescription,
-            OnboardingRestartError.launchFailed.localizedDescription,
+            OnboardingRestartError.intentSaveFailed.localizedDescription,
             AppLog.safeDescription(rawDiagnostics),
         ]
         expect(
@@ -715,27 +715,68 @@ enum RegressionTestSuite {
         expect(
             DockLifecyclePolicy.reopenDestination(
                 isDebug: false,
+                hasVisibleWindows: false,
                 allPermissionsGranted: true,
                 setupIsComplete: true
             ) == .settings
                 && DockLifecyclePolicy.reopenDestination(
                     isDebug: false,
+                    hasVisibleWindows: false,
                     allPermissionsGranted: false,
                     setupIsComplete: true
                 ) == .onboarding
                 && DockLifecyclePolicy.reopenDestination(
                     isDebug: false,
+                    hasVisibleWindows: true,
                     allPermissionsGranted: true,
                     setupIsComplete: false
                 ) == .onboarding
                 && DockLifecyclePolicy.reopenDestination(
                     isDebug: true,
+                    hasVisibleWindows: true,
                     allPermissionsGranted: true,
                     setupIsComplete: true
                 ) == .unchanged
+                && DockLifecyclePolicy.reopenDestination(
+                    isDebug: true,
+                    hasVisibleWindows: false,
+                    allPermissionsGranted: true,
+                    setupIsComplete: true
+                ) == .settings
                 && DockLifecyclePolicy.keepsRunningAfterLastWindowClosed(isDebug: false)
                 && !DockLifecyclePolicy.keepsRunningAfterLastWindowClosed(isDebug: true),
             "Dock re-open prioritizes onboarding and normal app stays resident"
+        )
+        expect(
+            DebugMainWindowLaunchPolicy.presentsRestartIntent(
+                isDebug: true,
+                mode: .debugPreview
+            )
+                && !DebugMainWindowLaunchPolicy.opensAutomatically(
+                    isDebug: true,
+                    restartPresentationMode: .debugPreview
+                )
+                && DebugMainWindowLaunchPolicy.opensAutomatically(
+                    isDebug: true,
+                    restartPresentationMode: .firstRun
+                )
+                && DebugMainWindowLaunchPolicy.opensAutomatically(
+                    isDebug: true,
+                    restartPresentationMode: nil
+                )
+                && !DebugMainWindowLaunchPolicy.presentsRestartIntent(
+                    isDebug: false,
+                    mode: .debugPreview
+                )
+                && DebugMainWindowLaunchPolicy.opensAfterRestartWindowClosed(
+                    isDebug: true,
+                    restartPresentationMode: .debugRehearsal
+                )
+                && !DebugMainWindowLaunchPolicy.opensAfterRestartWindowClosed(
+                    isDebug: false,
+                    restartPresentationMode: .debugRehearsal
+                ),
+            "Debug launcher is suppressed only when the saved route will present a window"
         )
         expect(
             MenuBarIconPolicy.usesCustomTemplate(isDebug: false, systemImageName: "mic")
@@ -3142,6 +3183,7 @@ enum RegressionTestSuite {
         let restartIntentStore = OnboardingRestartIntentStore(fileURL: restartIntentURL)
         let restartIntent = OnboardingRestartIntent(
             mode: .debugRehearsal,
+            step: .aiCommand,
             bundleIdentifier: "com.koedex.onboarding-debug"
         )!
         do {
@@ -3151,154 +3193,236 @@ enum RegressionTestSuite {
         }
         expect(
             restartIntentStore.load(bundleIdentifier: "com.koedex.onboarding-debug") == restartIntent
-                && restartIntent.presentationMode == .debugRehearsal,
+                && restartIntent.presentationMode == .debugRehearsal
+                && restartIntent.step == .aiCommand
+                && DebugLaunchLogPolicy.message(
+                    restartIntent: restartIntent,
+                    forcedInitialStepApplied: true,
+                    openedStepIndex: 4
+                ) == "[DebugLaunch] restartIntentFound=true route=debugRehearsal step=aiCommand forcedInitialStepApplied=true openedStepIndex=4"
+                && DebugLaunchLogPolicy.message(
+                    restartIntent: nil,
+                    forcedInitialStepApplied: false,
+                    openedStepIndex: nil
+                ) == "[DebugLaunch] restartIntentFound=false route=none step=none forcedInitialStepApplied=false openedStepIndex=none",
             "restart intent preserves the Debug route until the restored page is shown"
         )
-        if let sourcePID = restartIntent.sourceProcessIdentifier {
-            expect(
-                restartIntent.generation != nil
-                    && OnboardingRestartHandoff.shouldWaitForSourceProcessExit(
-                        restartIntent,
-                        currentProcessIdentifier: sourcePID + 1,
-                        isProcessAlive: { $0 == sourcePID }
-                    )
-                    && !OnboardingRestartHandoff.shouldWaitForSourceProcessExit(
-                        restartIntent,
-                        currentProcessIdentifier: sourcePID,
-                        isProcessAlive: { _ in true }
-                    )
-                    && !OnboardingRestartHandoff.shouldWaitForSourceProcessExit(
-                        restartIntent,
-                        currentProcessIdentifier: sourcePID + 1,
-                        isProcessAlive: { _ in false }
-                    ),
-                "restart handoff defers the successor UI only while the old PID is alive"
+        let orphanedClaimURL = restartIntentDirectory.appendingPathComponent("restart.json.claim-orphan")
+        let unrelatedURL = restartIntentDirectory.appendingPathComponent("restart.json.backup")
+        let nestedDirectory = restartIntentDirectory.appendingPathComponent("nested", isDirectory: true)
+        let nestedClaimURL = nestedDirectory.appendingPathComponent("restart.json.claim-nested")
+        let claimDirectoryURL = restartIntentDirectory.appendingPathComponent(
+            "restart.json.claim-directory",
+            isDirectory: true
+        )
+        let siblingClaimURL = restartIntentDirectory.deletingLastPathComponent()
+            .appendingPathComponent("restart.json.claim-sibling-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: nestedDirectory, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: claimDirectoryURL, withIntermediateDirectories: true)
+        _ = FileManager.default.createFile(atPath: orphanedClaimURL.path, contents: Data())
+        _ = FileManager.default.createFile(atPath: unrelatedURL.path, contents: Data())
+        _ = FileManager.default.createFile(atPath: nestedClaimURL.path, contents: Data())
+        _ = FileManager.default.createFile(atPath: siblingClaimURL.path, contents: Data())
+        expect(
+            OnboardingRestartIntentFilePolicy.isOrphanedClaim(
+                orphanedClaimURL,
+                canonicalURL: restartIntentURL
             )
-        } else {
-            expect(false, "restart intent records the source PID and generation")
-        }
-        if let sourcePID = restartIntent.sourceProcessIdentifier,
-           let generation = restartIntent.generation,
-           let createdAt = restartIntent.createdAt,
-           let expiresAt = restartIntent.expiresAt {
-            expect(
-                restartIntent.handoffStatus == .pending
-                    && restartIntent.handoffFailure == nil
-                    && OnboardingRestartHandoff.sourceProcessState(
-                        restartIntent,
-                        now: createdAt,
-                        currentProcessIdentifier: sourcePID + 1,
-                        isProcessAlive: { $0 == sourcePID }
-                    ) == .alive
-                    && OnboardingRestartHandoff.sourceProcessState(
-                        restartIntent,
-                        now: createdAt,
-                        currentProcessIdentifier: sourcePID + 1,
-                        isProcessAlive: { _ in false }
-                    ) == .exited
-                    && OnboardingRestartHandoff.sourceProcessState(
-                        restartIntent,
-                        now: expiresAt,
-                        currentProcessIdentifier: sourcePID + 1,
-                        isProcessAlive: { _ in true }
-                    ) == .timedOut,
-                "restart handoff distinguishes alive, exited, and timed-out source PIDs"
-            )
-            expect(
-                OnboardingRestartHandoff.validatesHelperInvocation(
-                    intent: restartIntent,
-                    bundleIdentifier: restartIntent.bundleIdentifier,
-                    sourcePID: sourcePID,
-                    generation: generation,
-                    createdAt: createdAt,
-                    expiresAt: expiresAt,
-                    now: createdAt
+                && !OnboardingRestartIntentFilePolicy.isOrphanedClaim(
+                    unrelatedURL,
+                    canonicalURL: restartIntentURL
                 )
-                    && !OnboardingRestartHandoff.validatesHelperInvocation(
-                        intent: restartIntent,
-                        bundleIdentifier: "com.example.other",
-                        sourcePID: sourcePID,
-                        generation: generation,
-                        createdAt: createdAt,
-                        expiresAt: expiresAt,
-                        now: createdAt
-                    )
-                    && !OnboardingRestartHandoff.validatesHelperInvocation(
-                        intent: restartIntent,
-                        bundleIdentifier: restartIntent.bundleIdentifier,
-                        sourcePID: sourcePID,
-                        generation: UUID(),
-                        createdAt: createdAt,
-                        expiresAt: expiresAt,
-                        now: createdAt
-                    )
-                    && !OnboardingRestartHandoff.validatesHelperInvocation(
-                        intent: restartIntent,
-                        bundleIdentifier: restartIntent.bundleIdentifier,
-                        sourcePID: sourcePID,
-                        generation: generation,
-                        createdAt: createdAt,
-                        expiresAt: expiresAt,
-                        now: expiresAt
-                    ),
-                "restart helper rejects bundle, generation, and expiry mismatches"
-            )
-            var helperFailedIntent = restartIntent
-            helperFailedIntent.handoffStatus = .helperFailed
-            helperFailedIntent.handoffFailure = .sourceExitTimedOut
-            expect(
-                helperFailedIntent.step == .permissions
-                    && helperFailedIntent.presentationMode == restartIntent.presentationMode,
-                "helper failure retains the restart intent for manual Step 3 recovery"
-            )
-            var helperSuccessIntent = restartIntent
-            helperSuccessIntent.handoffStatus = .helperLaunched
-            expect(
-                OnboardingRestartFeedbackPolicy.initialFeedbackKey(for: helperFailedIntent)
-                    == "アプリを再起動できませんでした。少し待ってから、もう一度試してください。"
-                    && OnboardingRestartFeedbackPolicy.initialFeedbackKey(for: helperSuccessIntent) == nil,
-                "only a failed helper handoff displays the restart error on Step 3"
-            )
-        } else {
-            expect(false, "restart intent records helper validation fields")
-        }
+                && !OnboardingRestartIntentFilePolicy.isOrphanedClaim(
+                    nestedClaimURL,
+                    canonicalURL: restartIntentURL
+                )
+                && !OnboardingRestartIntentFilePolicy.isOrphanedClaim(
+                    siblingClaimURL,
+                    canonicalURL: restartIntentURL
+                )
+                && !OnboardingRestartIntentFilePolicy.isOrphanedClaim(
+                    claimDirectoryURL,
+                    canonicalURL: restartIntentURL,
+                    isDirectory: true
+                ),
+            "restart claim cleanup is limited to canonical-prefix files beside the intent"
+        )
+        let cleanupRestartIntentStore = OnboardingRestartIntentStore(fileURL: restartIntentURL)
+        let orphanSurvivedStoreInitialization = FileManager.default.fileExists(atPath: orphanedClaimURL.path)
+        cleanupRestartIntentStore.cleanupOrphanedClaims()
+        expect(
+            orphanSurvivedStoreInitialization
+                && !FileManager.default.fileExists(atPath: orphanedClaimURL.path)
+                && FileManager.default.fileExists(atPath: unrelatedURL.path)
+                && FileManager.default.fileExists(atPath: nestedClaimURL.path)
+                && FileManager.default.fileExists(atPath: siblingClaimURL.path)
+                && FileManager.default.fileExists(atPath: claimDirectoryURL.path)
+                && cleanupRestartIntentStore.load(bundleIdentifier: "com.koedex.onboarding-debug")
+                    == restartIntent,
+            "explicit nonrecursive cleanup removes a direct matching claim and preserves other fixtures"
+        )
+        expect(
+            OnboardingRestartPresentationPolicy.presents(.debugPreview)
+                && OnboardingRestartPresentationPolicy.presents(.debugRehearsal)
+                && OnboardingRestartPresentationPolicy.presents(.permissionRecovery)
+                && !OnboardingRestartPresentationPolicy.presents(.guide)
+                && OnboardingRestartPresentationPolicy.usesSimulatedPermissions(for: .debugPreview)
+                && !OnboardingRestartPresentationPolicy.usesSimulatedPermissions(for: .debugRehearsal)
+                && !OnboardingRestartPresentationPolicy.startsPermissionPolling(for: .debugPreview)
+                && OnboardingRestartPresentationPolicy.startsPermissionPolling(for: .debugRehearsal)
+                && OnboardingRestartPresentationPolicy.defersWindowCloseAfterCompletion(for: .debugPreview)
+                && !OnboardingRestartPresentationPolicy.defersWindowCloseAfterCompletion(for: .permissionRecovery),
+            "resume intent preserves Debug isolation, polling, and last-window behavior"
+        )
+        expect(
+            OnboardingRestartRequestPolicy.permitsRestart(isQuitting: false)
+                && !OnboardingRestartRequestPolicy.permitsRestart(isQuitting: true),
+            "restart request policy permits only the first in-flight quit attempt"
+        )
         let legacyRestartIntentData = Data(
-            "{\"route\":\"firstRun\",\"step\":\"permissions\",\"bundleIdentifier\":\"com.koedex.app\"}".utf8
+            "{\"route\":\"firstRun\",\"step\":\"permissions\",\"bundleIdentifier\":\"com.koedex.app\",\"obsoleteField\":true}".utf8
         )
         let legacyRestartIntent = try? JSONDecoder().decode(OnboardingRestartIntent.self, from: legacyRestartIntentData)
         expect(
-            legacyRestartIntent?.sourceProcessIdentifier == nil
-                && legacyRestartIntent?.generation == nil
-                && legacyRestartIntent?.handoffStatus == nil
-                && legacyRestartIntent?.handoffFailure == nil
-                && legacyRestartIntent.flatMap { OnboardingRestartFeedbackPolicy.initialFeedbackKey(for: $0) } == nil,
-            "legacy restart intent without helper fields remains decodable and shows no failure feedback"
+            legacyRestartIntent?.step == .permissions
+                && legacyRestartIntent?.presentationMode == .firstRun,
+            "legacy restart intent ignores removed extra fields and remains decodable"
+        )
+        cleanupRestartIntentStore.clear()
+        try? FileManager.default.removeItem(at: restartIntentDirectory)
+        try? FileManager.default.removeItem(at: siblingClaimURL)
+        let terminationEpoch = Date(timeIntervalSince1970: 1_000_000)
+        let firstGracefulDeadline = ApplicationTerminationDeadlinePolicy.gracefulDeadline(
+            now: terminationEpoch,
+            existing: nil
         )
         expect(
-            OnboardingRestartRequestPolicy.permitsRestart(isRestarting: false)
-                && !OnboardingRestartRequestPolicy.permitsRestart(isRestarting: true),
-            "repeated restart taps do not start a second helper handoff"
+            firstGracefulDeadline
+                == terminationEpoch.addingTimeInterval(ApplicationTerminationDeadlinePolicy.gracefulInterval)
+                && ApplicationTerminationDeadlinePolicy.gracefulDeadline(
+                    now: terminationEpoch.addingTimeInterval(2),
+                    existing: firstGracefulDeadline
+                ) == firstGracefulDeadline
+                && ApplicationTerminationDeadlinePolicy.remainingInterval(
+                    now: terminationEpoch.addingTimeInterval(2),
+                    deadline: firstGracefulDeadline
+                ) == 1
+                && ApplicationTerminationDeadlinePolicy.remainingInterval(
+                    now: terminationEpoch.addingTimeInterval(9),
+                    deadline: firstGracefulDeadline
+                ) == 0
+                && ApplicationTerminationDeadlinePolicy.gracefulInterval
+                < ApplicationTerminationDeadlinePolicy.hardExitInterval
+                && ApplicationTerminationDeadlinePolicy.armsTimeoutWatchdog(hasArmedWatchdog: false)
+                && !ApplicationTerminationDeadlinePolicy.armsTimeoutWatchdog(hasArmedWatchdog: true)
+                && ApplicationTerminationDeadlinePolicy.armsPreReplyForcedExit(isUserInitiated: true)
+                && !ApplicationTerminationDeadlinePolicy.armsPreReplyForcedExit(isUserInitiated: false)
+                && ApplicationTerminationDeadlinePolicy.permitsForcedExit(
+                    deadlineGeneration: 4,
+                    currentGeneration: 4,
+                    isCancelled: false
+                )
+                && !ApplicationTerminationDeadlinePolicy.permitsForcedExit(
+                    deadlineGeneration: 4,
+                    currentGeneration: 5,
+                    isCancelled: false
+                )
+                && !ApplicationTerminationDeadlinePolicy.permitsForcedExit(
+                    deadlineGeneration: 4,
+                    currentGeneration: 4,
+                    isCancelled: true
+                )
+                && ApplicationTerminationOriginPolicy.isUserInitiated(hasSystemQuitReason: false)
+                && !ApplicationTerminationOriginPolicy.isUserInitiated(hasSystemQuitReason: true)
+                && ApplicationTerminationOriginPolicy.hasSystemQuitReason(
+                    eventClass: kCoreEventClass,
+                    eventID: kAEQuitApplication,
+                    hasAttribute: true,
+                    hasParameter: false
+                )
+                && ApplicationTerminationOriginPolicy.hasSystemQuitReason(
+                    eventClass: kCoreEventClass,
+                    eventID: kAEQuitApplication,
+                    hasAttribute: false,
+                    hasParameter: true
+                )
+                && !ApplicationTerminationOriginPolicy.hasSystemQuitReason(
+                    eventClass: kCoreEventClass,
+                    eventID: 0,
+                    hasAttribute: true,
+                    hasParameter: false
+                )
+                && !ApplicationTerminationOriginPolicy.hasSystemQuitReason(
+                    eventClass: 0,
+                    eventID: kAEQuitApplication,
+                    hasAttribute: true,
+                    hasParameter: false
+                ),
+            "repeated Quit requests reuse the armed watchdog and the same absolute graceful deadline"
+        )
+        expect(
+            ApplicationTerminationSubsystemPolicy.runsShutdown(isDebug: false)
+                && !ApplicationTerminationSubsystemPolicy.runsShutdown(isDebug: true),
+            "Debug termination exercises the coordinator without starting normal subsystems"
         )
         var terminationReplyCount = 0
         var terminationWarningCount = 0
+        let terminationForcedExitProbe = ForcedExitProbe()
+        // 実プロセスの強制終了を回帰テストで武装しない。ここが本物の`_exit`のままだと、
+        // 締切の取り消しが壊れた時にテストが成功終了に見えてしまう。
         let terminationCoordinator = ApplicationTerminationCoordinator(
             shutdown: {},
             reply: { terminationReplyCount += 1 },
-            timeoutWarning: { terminationWarningCount += 1 }
+            timeoutWarning: { terminationWarningCount += 1 },
+            forcedExit: { terminationForcedExitProbe.record() }
         )
         let firstTerminationRequest = terminationCoordinator.request()
         let repeatedTerminationRequest = terminationCoordinator.request()
+        let armedForcedExitWhileShuttingDown = terminationCoordinator.hasArmedForcedExitDeadline
         terminationCoordinator.replyOnce()
         terminationCoordinator.replyOnce()
         terminationCoordinator.handleTimeout()
+        // replyしただけでは終了が確定しない（ログアウトの取り消しなど）ので、
+        // 強制終了の締切はここで一旦外れていなければならない。
+        let armedForcedExitAfterReply = terminationCoordinator.hasArmedForcedExitDeadline
+        let repliedTerminationRequest = terminationCoordinator.request()
+        terminationCoordinator.confirmTermination()
+        let armedForcedExitAfterWillTerminate = terminationCoordinator.hasArmedForcedExitDeadline
+        terminationCoordinator.cancelTermination()
+        let armedForcedExitAfterCancel = terminationCoordinator.hasArmedForcedExitDeadline
+        let terminationRequestAfterCancel = terminationCoordinator.request()
+        // 締切を残したままテストを抜けると、後から本物のWARNとexitが走る。
+        terminationCoordinator.cancelTermination()
         expect(
             firstTerminationRequest == .terminateLater
                 && repeatedTerminationRequest == .terminateLater
-                && terminationCoordinator.state == .replied
+                && repliedTerminationRequest == .terminateNow
                 && terminationReplyCount == 1
                 && terminationWarningCount == 0
-                && terminationCoordinator.request() == .terminateNow,
-            "normal shutdown suppresses timeout warning and multiple Quit requests reply exactly once"
+                && armedForcedExitWhileShuttingDown
+                && !armedForcedExitAfterReply
+                && armedForcedExitAfterWillTerminate
+                && !armedForcedExitAfterCancel
+                && terminationRequestAfterCancel == .terminateLater
+                && !terminationCoordinator.hasArmedForcedExitDeadline
+                && terminationCoordinator.state == .idle
+                && terminationForcedExitProbe.recordedCount == 0,
+            "an abandoned termination cancels the forced-exit deadline and a later Quit still works"
+        )
+        let systemTerminationCoordinator = ApplicationTerminationCoordinator(
+            shutdown: {},
+            reply: {},
+            timeoutWarning: {},
+            forcedExit: { terminationForcedExitProbe.record() }
+        )
+        let systemTerminationRequest = systemTerminationCoordinator.request(isUserInitiated: false)
+        let armedForcedExitForSystemTermination = systemTerminationCoordinator.hasArmedForcedExitDeadline
+        systemTerminationCoordinator.cancelTermination()
+        expect(
+            systemTerminationRequest == .terminateLater
+                && !armedForcedExitForSystemTermination
+                && !systemTerminationCoordinator.hasArmedForcedExitDeadline,
+            "a cancellable system termination never arms the pre-reply forced exit"
         )
         restartIntentStore.clear()
         expect(
@@ -6855,5 +6979,24 @@ enum RegressionTestSuite {
             reasoningEffort: nil,
             latencyMs: nil
         )
+    }
+}
+
+/// 回帰テストが本物の`_exit`を武装しないための差し替え先。締切は別スレッドで
+/// 発火しうるので、回数の記録だけスレッド安全にしておく。
+private final class ForcedExitProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    func record() {
+        lock.lock()
+        count += 1
+        lock.unlock()
+    }
+
+    var recordedCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
     }
 }

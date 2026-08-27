@@ -11,13 +11,9 @@ struct OnboardingDebugLauncherView: View {
 
     @ObservedObject var settingsStore: SettingsStore
     @State private var destination: Destination?
-    @State private var restartIntent: OnboardingRestartIntent?
-    @State private var isWaitingForRestartHandoff = false
-    @State private var restartHandoffTask: Task<Void, Never>?
     @StateObject private var permissionResetController = DebugPermissionResetController()
     @State private var showsPermissionResetConfirmation = false
     @State private var showsFreshSetupResetConfirmation = false
-    private let restartIntentStore = OnboardingRestartIntentStore()
 
     private var uiLanguage: AppLanguage {
         settingsStore.settings.languagePreferences.uiLanguage
@@ -35,29 +31,15 @@ struct OnboardingDebugLauncherView: View {
         Group {
             switch destination {
             case .preview:
-                OnboardingDebugPreviewHost(
-                    settingsStore: settingsStore,
-                    forcedInitialStep: restartIntent?.step,
-                    onForcedInitialStepPresented: clearRestartIntent
-                ) {
+                OnboardingDebugPreviewHost(settingsStore: settingsStore) {
                     destination = nil
-                    restartIntent = nil
                 }
             case .rehearsal:
-                OnboardingDebugRehearsalHost(
-                    settingsStore: settingsStore,
-                    forcedInitialStep: restartIntent?.step,
-                    onForcedInitialStepPresented: clearRestartIntent
-                ) {
+                OnboardingDebugRehearsalHost(settingsStore: settingsStore) {
                     destination = nil
-                    restartIntent = nil
                 }
             case nil:
-                if isWaitingForRestartHandoff {
-                    restartHandoffView
-                } else {
-                    launcher
-                }
+                launcher
             }
         }
         .frame(
@@ -66,9 +48,6 @@ struct OnboardingDebugLauncherView: View {
         )
         .onboardingUIScale(uiMetrics)
         .dynamicTypeSize(.xxLarge)
-        .onAppear {
-            restoreRestartIntentIfNeeded()
-        }
         .environment(\.locale, uiLanguage.locale)
         .sheet(isPresented: $showsPermissionResetConfirmation) {
             AppConfirmationSheet(
@@ -104,19 +83,6 @@ struct OnboardingDebugLauncherView: View {
                 onCancel: {}
             )
         }
-    }
-
-    private var restartHandoffView: some View {
-        VStack(spacing: uiMetrics.layout(12)) {
-            ProgressView()
-            Text(uiText("アプリを再起動しています…"))
-                .font(uiMetrics.font(.headline))
-            Text(uiText("前のアプリが終了したら、権限の確認画面を自動で開きます。"))
-                .font(uiMetrics.font(.caption))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(uiMetrics.layout(28))
     }
 
     private var launcher: some View {
@@ -214,47 +180,6 @@ struct OnboardingDebugLauncherView: View {
             .disabled(permissionResetController.isResetting)
             Button(uiText("Debug.appを終了")) { NSApp.terminate(nil) }
         }
-    }
-
-    private func restoreRestartIntentIfNeeded() {
-        guard destination == nil, restartHandoffTask == nil else { return }
-        let bundleIdentifier = Bundle.main.bundleIdentifier ?? ""
-        guard let intent = restartIntentStore.load(bundleIdentifier: bundleIdentifier) else { return }
-        restartIntent = intent
-        if OnboardingRestartHandoff.shouldWaitForSourceProcessExit(intent) {
-            isWaitingForRestartHandoff = true
-            restartHandoffTask = Task {
-                await OnboardingRestartHandoff.waitForSourceProcessExit(intent)
-                guard !Task.isCancelled else { return }
-                isWaitingForRestartHandoff = false
-                restartHandoffTask = nil
-                presentRestartIntent(intent)
-                NSApp.activate(ignoringOtherApps: true)
-                (NSApp.mainWindow ?? NSApp.windows.first)?.makeKeyAndOrderFront(nil)
-            }
-            return
-        }
-        presentRestartIntent(intent)
-    }
-
-    private func presentRestartIntent(_ intent: OnboardingRestartIntent) {
-        switch intent.presentationMode {
-        case .debugPreview:
-            destination = .preview
-        case .debugRehearsal:
-            destination = .rehearsal
-        case .firstRun, .upgrade, .permissionRecovery, .guide:
-            restartIntentStore.clear()
-            restartIntent = nil
-        }
-    }
-
-    private func clearRestartIntent() {
-        restartIntentStore.clear()
-        restartIntent = nil
-        restartHandoffTask?.cancel()
-        restartHandoffTask = nil
-        isWaitingForRestartHandoff = false
     }
 
     /// 隔離された保存先に実際に入っている値を、そのまま読める形で見せる。
@@ -454,8 +379,6 @@ final class DebugPermissionResetController: ObservableObject {
 
 private struct OnboardingDebugPreviewHost: View {
     @ObservedObject var settingsStore: SettingsStore
-    let forcedInitialStep: OnboardingStep?
-    let onForcedInitialStepPresented: (() -> Void)?
     let onClose: () -> Void
     @StateObject private var permissionManager = PermissionManager(simulatedStates: .initial)
 
@@ -464,28 +387,20 @@ private struct OnboardingDebugPreviewHost: View {
             permissionManager: permissionManager,
             settingsStore: settingsStore,
             mode: .debugPreview,
-            forcedInitialStep: forcedInitialStep,
-            onForcedInitialStepPresented: onForcedInitialStepPresented,
-            onRestartPreparationCompleted: hideDebugWindowForRestart,
-            onRestartFailure: restoreDebugWindowAfterRestartFailure,
+            forcedInitialStep: nil,
+            onForcedInitialStepPresented: nil,
+            onQuitPreparationCompleted: hideDebugWindowForQuit,
             onFinish: onClose
         )
     }
 
-    private func hideDebugWindowForRestart() {
+    private func hideDebugWindowForQuit() {
         NSApp.mainWindow?.orderOut(nil)
-    }
-
-    private func restoreDebugWindowAfterRestartFailure() {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.mainWindow?.makeKeyAndOrderFront(nil)
     }
 }
 
 private struct OnboardingDebugRehearsalHost: View {
     @ObservedObject var settingsStore: SettingsStore
-    let forcedInitialStep: OnboardingStep?
-    let onForcedInitialStepPresented: (() -> Void)?
     let onClose: () -> Void
     @StateObject private var permissionManager = PermissionManager()
 
@@ -494,10 +409,9 @@ private struct OnboardingDebugRehearsalHost: View {
             permissionManager: permissionManager,
             settingsStore: settingsStore,
             mode: .debugRehearsal,
-            forcedInitialStep: forcedInitialStep,
-            onForcedInitialStepPresented: onForcedInitialStepPresented,
-            onRestartPreparationCompleted: hideDebugWindowForRestart,
-            onRestartFailure: restoreDebugWindowAfterRestartFailure,
+            forcedInitialStep: nil,
+            onForcedInitialStepPresented: nil,
+            onQuitPreparationCompleted: hideDebugWindowForQuit,
             onFinish: onClose
         )
         .onAppear {
@@ -509,12 +423,7 @@ private struct OnboardingDebugRehearsalHost: View {
         }
     }
 
-    private func hideDebugWindowForRestart() {
+    private func hideDebugWindowForQuit() {
         NSApp.mainWindow?.orderOut(nil)
-    }
-
-    private func restoreDebugWindowAfterRestartFailure() {
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.mainWindow?.makeKeyAndOrderFront(nil)
     }
 }

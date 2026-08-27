@@ -316,7 +316,7 @@ actor CodexAppServerClient {
                     "title": "Koedex",
                 // アプリ版数を名乗る。`scripts/make_app.sh` のCFBundleShortVersionStringと
                 // 一緒に上げること。バンドル外実行でもnilにならないよう定数で持つ。
-                "version": "0.1.6",
+                "version": "0.1.7",
                 ],
                 "capabilities": [
                     "experimentalApi": false,

@@ -3,6 +3,7 @@ import AppKit
 import AVFoundation
 import Combine
 import Carbon.HIToolbox
+import CoreServices
 
 struct AICommandFailureOwnership {
     private(set) var ownerID: UUID?
@@ -26,8 +27,7 @@ extension Notification.Name {
     static let koedexOpenSettings = Notification.Name("Koedex.openSettings")
 }
 
-/// Dockの再オープン時に、通常版がどの画面を優先するかをUI非依存で決める。
-/// Debug.appは従来の通常macOSアプリ挙動を維持するため、ここでは介入しない。
+/// Dockの再オープン時に、可視ウィンドウとセットアップ状態から表示先を決める。
 enum DockLifecyclePolicy {
     enum ReopenDestination: Equatable {
         case unchanged
@@ -37,15 +37,56 @@ enum DockLifecyclePolicy {
 
     static func reopenDestination(
         isDebug: Bool,
+        hasVisibleWindows: Bool,
         allPermissionsGranted: Bool,
         setupIsComplete: Bool
     ) -> ReopenDestination {
-        guard !isDebug else { return .unchanged }
+        if isDebug {
+            return hasVisibleWindows ? .unchanged : .settings
+        }
         return allPermissionsGranted && setupIsComplete ? .settings : .onboarding
     }
 
     static func keepsRunningAfterLastWindowClosed(isDebug: Bool) -> Bool {
         !isDebug
+    }
+}
+
+/// Debug.appの起動時に、実際に表示する再開画面とランチャーを重ねないための規則。
+enum DebugMainWindowLaunchPolicy {
+    static func presentsRestartIntent(
+        isDebug: Bool,
+        mode: OnboardingPresentationMode?
+    ) -> Bool {
+        guard let mode else { return false }
+        return isDebug && mode.isDebug && OnboardingRestartPresentationPolicy.presents(mode)
+    }
+
+    static func opensAutomatically(
+        isDebug: Bool,
+        restartPresentationMode: OnboardingPresentationMode?
+    ) -> Bool {
+        isDebug && !presentsRestartIntent(isDebug: isDebug, mode: restartPresentationMode)
+    }
+
+    static func opensAfterRestartWindowClosed(
+        isDebug: Bool,
+        restartPresentationMode: OnboardingPresentationMode
+    ) -> Bool {
+        isDebug && restartPresentationMode.isDebug
+    }
+}
+
+enum DebugLaunchLogPolicy {
+    static func message(
+        restartIntent: OnboardingRestartIntent?,
+        forcedInitialStepApplied: Bool,
+        openedStepIndex: Int?
+    ) -> String {
+        let route = restartIntent?.route.rawValue ?? "none"
+        let step = restartIntent?.step.rawValue ?? "none"
+        let openedIndex = openedStepIndex.map(String.init) ?? "none"
+        return "[DebugLaunch] restartIntentFound=\(restartIntent != nil) route=\(route) step=\(step) forcedInitialStepApplied=\(forcedInitialStepApplied) openedStepIndex=\(openedIndex)"
     }
 }
 
@@ -89,20 +130,17 @@ private struct MenuBarStatusIcon: View {
 }
 
 private struct SettingsWindowOpenBridge: View {
+    let opensDebugMainWindowAutomatically: Bool
     @Environment(\.openWindow) private var openWindow
-    @State private var didOpenDebugMainWindow = false
 
     var body: some View {
         Color.clear
             .frame(width: 0, height: 0)
             .onAppear {
-                // SwiftUIのWindow sceneは、MenuBarExtraだけで再起動した場合に
-                // 自動生成されないことがある。Debug.appは起動直後に必ず
-                // セットアップ用Windowを要求し、保存済みのrestart intentを
-                // 表示できるようにする。
-                guard OnboardingRuntimeProfile.isDebug, !didOpenDebugMainWindow else { return }
-                didOpenDebugMainWindow = true
-                openMainWindow()
+                openDebugMainWindowIfNeeded()
+            }
+            .onChange(of: opensDebugMainWindowAutomatically) {
+                openDebugMainWindowIfNeeded()
             }
             .onReceive(NotificationCenter.default.publisher(for: .koedexOpenSettings)) { _ in
                 openMainWindow()
@@ -112,6 +150,14 @@ private struct SettingsWindowOpenBridge: View {
     private func openMainWindow() {
         openWindow(id: "main-window")
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func openDebugMainWindowIfNeeded() {
+        // SwiftUIのWindow sceneは、MenuBarExtraだけで起動した場合に
+        // 自動生成されないことがある。再開画面を表示していない時だけ、
+        // Debugランチャーを要求する。
+        guard opensDebugMainWindowAutomatically else { return }
+        openMainWindow()
     }
 }
 
@@ -214,7 +260,9 @@ struct KoedexApp: App {
             MenuBarStatusIcon(
                 systemImageName: OnboardingRuntimeProfile.isDebug ? "ladybug.fill" : appDelegate.menuBarIconName
             )
-                .background(SettingsWindowOpenBridge())
+                .background(SettingsWindowOpenBridge(
+                    opensDebugMainWindowAutomatically: appDelegate.opensDebugMainWindowAutomatically
+                ))
         }
 
         Window(mainWindowTitle, id: "main-window") {
@@ -656,6 +704,115 @@ enum RecordingHUDLifecyclePolicy {
     }
 }
 
+/// Debug.appが起動していない通常サブシステムを、終了時に初期化しないための規則。
+enum ApplicationTerminationSubsystemPolicy {
+    static func runsShutdown(isDebug: Bool) -> Bool { !isDebug }
+}
+
+enum ApplicationTerminationOriginPolicy {
+    static let quitReasonKeyword: AEKeyword = 0x7768_793F // `why?`
+
+    static func hasSystemQuitReason(
+        eventClass: AEEventClass,
+        eventID: AEEventID,
+        hasAttribute: Bool,
+        hasParameter: Bool
+    ) -> Bool {
+        eventClass == kCoreEventClass
+            && eventID == kAEQuitApplication
+            && (hasAttribute || hasParameter)
+    }
+
+    static func hasSystemQuitReason(in event: NSAppleEventDescriptor?) -> Bool {
+        guard let event else { return false }
+        return hasSystemQuitReason(
+            eventClass: event.eventClass,
+            eventID: event.eventID,
+            hasAttribute: event.attributeDescriptor(forKeyword: quitReasonKeyword) != nil,
+            hasParameter: event.paramDescriptor(forKeyword: quitReasonKeyword) != nil
+        )
+    }
+
+    static func isUserInitiated(hasSystemQuitReason: Bool) -> Bool {
+        !hasSystemQuitReason
+    }
+}
+
+/// graceful終了の締切に関する規則。`.shuttingDown`へ入った時刻だけで決まり、
+/// 以後のQuit要求では動かない。
+enum ApplicationTerminationDeadlinePolicy {
+    static let gracefulInterval: TimeInterval = 3
+    static let hardExitInterval: TimeInterval = 8
+    /// applicationWillTerminateの後もAppKitのteardownで固まりうるため、2段目の締切を残す。
+    static let postReplyExitInterval: TimeInterval = 5
+    /// replyしてもapplicationWillTerminateが届かない＝終了が取り消された、と判断するまでの猶予。
+    static let abandonedReplyInterval: TimeInterval = 5
+
+    /// 一度決めた締切は延ばさない。⌘Qの連打でgraceful側だけが後ろへずれると、
+    /// 動かない強制終了の締切に追い越されて強制終了に倒れる。
+    static func gracefulDeadline(
+        now: Date,
+        existing: Date?,
+        interval: TimeInterval = gracefulInterval
+    ) -> Date {
+        existing ?? now.addingTimeInterval(interval)
+    }
+
+    static func remainingInterval(now: Date, deadline: Date) -> TimeInterval {
+        max(0, deadline.timeIntervalSince(now))
+    }
+
+    /// ⌘Qの連打で、同じ絶対締切を見張るだけのTaskを作り直さない。
+    static func armsTimeoutWatchdog(hasArmedWatchdog: Bool) -> Bool { !hasArmedWatchdog }
+
+    static func armsPreReplyForcedExit(isUserInitiated: Bool) -> Bool { isUserInitiated }
+
+    static func permitsForcedExit(
+        deadlineGeneration: Int,
+        currentGeneration: Int,
+        isCancelled: Bool
+    ) -> Bool {
+        !isCancelled && deadlineGeneration == currentGeneration
+    }
+}
+
+private final class ApplicationTerminationHardDeadlineState: @unchecked Sendable {
+    struct Identity: Equatable {
+        let generation: Int
+        let token: UUID
+    }
+
+    private let lock = NSLock()
+    private var activeIdentity: Identity?
+
+    var hasActiveDeadline: Bool {
+        lock.withLock { activeIdentity != nil }
+    }
+
+    func arm(generation: Int) -> Identity {
+        let identity = Identity(generation: generation, token: UUID())
+        lock.withLock { activeIdentity = identity }
+        return identity
+    }
+
+    func cancel() {
+        lock.withLock { activeIdentity = nil }
+    }
+
+    func isActive(_ identity: Identity) -> Bool {
+        lock.withLock {
+            guard let activeIdentity, activeIdentity.token == identity.token else {
+                return false
+            }
+            return ApplicationTerminationDeadlinePolicy.permitsForcedExit(
+                deadlineGeneration: identity.generation,
+                currentGeneration: activeIdentity.generation,
+                isCancelled: false
+            )
+        }
+    }
+}
+
 /// AppKitへは一度だけreplyし、複数のQuit要求でも同じshutdown taskを共有する。
 @MainActor
 final class ApplicationTerminationCoordinator {
@@ -664,53 +821,208 @@ final class ApplicationTerminationCoordinator {
     private(set) var state: State = .idle
     private var shutdownTask: Task<Void, Never>?
     private var timeoutTask: Task<Void, Never>?
+    /// replyしても終了が始まらなかった場合に、通常動作へ戻すための監視。強制終了はしない。
+    private var abandonedReplyTask: Task<Void, Never>?
+    /// MainActorが詰まっても発火できる、非MainActorの最終安全弁。
+    private var hardDeadlineWorkItem: DispatchWorkItem?
+    private let hardDeadlineState = ApplicationTerminationHardDeadlineState()
+    /// `.shuttingDown`へ入った時に一度だけ決める絶対締切。
+    private var gracefulDeadline: Date?
+    /// 取り消し後に遅れて完了したshutdownが、次の世代へreplyしないための識別子。
+    private var terminationGeneration = 0
     private let shutdown: @MainActor () async -> Void
     private let reply: @MainActor () -> Void
     private let timeoutWarning: @MainActor () -> Void
+    /// 強制終了の直前に、時間を区切って試すだけの後始末。
+    private let lastResortCleanup: @Sendable () -> Void
+    private let forcedExit: @Sendable () -> Void
 
     init(
         shutdown: @escaping @MainActor () async -> Void,
         reply: @escaping @MainActor () -> Void,
-        timeoutWarning: @escaping @MainActor () -> Void
+        timeoutWarning: @escaping @MainActor () -> Void,
+        lastResortCleanup: @escaping @Sendable () -> Void = {},
+        // `exit`はatexitハンドラとstdioのteardownを走らせるため、逃げようとしている
+        // スレッドが握るロックで止まりうる。最終手段は`_exit`にする。
+        forcedExit: @escaping @Sendable () -> Void = { _exit(0) }
     ) {
         self.shutdown = shutdown
         self.reply = reply
         self.timeoutWarning = timeoutWarning
+        self.lastResortCleanup = lastResortCleanup
+        self.forcedExit = forcedExit
     }
 
-    func request() -> NSApplication.TerminateReply {
+    /// MainActorが本当に詰まっていても終了を止めないよう、時間を区切って試すだけ。
+    nonisolated static func runBoundedOnMainThread(timeout: TimeInterval, work: @escaping @MainActor () -> Void) {
+        let semaphore = DispatchSemaphore(value: 0)
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated { work() }
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + timeout)
+    }
+
+    /// 締切が武装されているか。強制終了が取り消し後まで生き残っていないことを外から確かめる。
+    var hasArmedForcedExitDeadline: Bool { hardDeadlineState.hasActiveDeadline }
+
+    func request(isUserInitiated: Bool = true) -> NSApplication.TerminateReply {
         switch state {
         case .replied:
             return .terminateNow
         case .shuttingDown:
+            // graceful側は同じ絶対締切を使う。system起点の要求に続いて利用者が⌘Qした時は、
+            // その時点からpre-reply強制終了を新しく武装する。
+            armTimeoutWatchdogIfNeeded()
+            if ApplicationTerminationDeadlinePolicy.armsPreReplyForcedExit(
+                isUserInitiated: isUserInitiated
+            ), !hasArmedForcedExitDeadline {
+                armHardDeadline(
+                    after: ApplicationTerminationDeadlinePolicy.hardExitInterval,
+                    reason: "terminationCoordinatorが締切内にreplyできなかったため強制終了します",
+                    generation: terminationGeneration
+                )
+            }
             return .terminateLater
         case .idle:
             state = .shuttingDown
+            gracefulDeadline = ApplicationTerminationDeadlinePolicy.gracefulDeadline(
+                now: Date(),
+                existing: nil
+            )
+            terminationGeneration += 1
+            let generation = terminationGeneration
             shutdownTask = Task { [weak self] in
                 guard let self else { return }
                 await self.shutdown()
-                self.replyOnce()
+                self.replyOnce(generation: generation)
             }
-            timeoutTask = Task { [weak self] in
-                do {
-                    try await Task.sleep(nanoseconds: 3_000_000_000)
-                } catch is CancellationError {
-                    return
-                } catch {
-                    return
-                }
-                guard let self else { return }
-                self.handleTimeout()
+            armTimeoutWatchdogIfNeeded()
+            if ApplicationTerminationDeadlinePolicy.armsPreReplyForcedExit(
+                isUserInitiated: isUserInitiated
+            ) {
+                armHardDeadline(
+                    after: ApplicationTerminationDeadlinePolicy.hardExitInterval,
+                    reason: "terminationCoordinatorが締切内にreplyできなかったため強制終了します",
+                    generation: generation
+                )
             }
             return .terminateLater
         }
     }
 
+    private func armTimeoutWatchdogIfNeeded() {
+        guard ApplicationTerminationDeadlinePolicy.armsTimeoutWatchdog(
+            hasArmedWatchdog: timeoutTask != nil
+        ) else { return }
+        let deadline = ApplicationTerminationDeadlinePolicy.gracefulDeadline(
+            now: Date(),
+            existing: gracefulDeadline
+        )
+        gracefulDeadline = deadline
+        let remaining = ApplicationTerminationDeadlinePolicy.remainingInterval(now: Date(), deadline: deadline)
+        timeoutTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+            } catch is CancellationError {
+                return
+            } catch {
+                return
+            }
+            guard let self else { return }
+            self.handleTimeout()
+        }
+    }
+
+    /// MainActorのTaskに依存しない絶対締切。MainActorが完全に詰まっていても
+    /// Quitを確実に終わらせる。
+    private func armHardDeadline(after interval: TimeInterval, reason: String, generation: Int) {
+        cancelHardDeadline()
+        let cleanup = lastResortCleanup
+        let exitNow = forcedExit
+        let deadlineState = hardDeadlineState
+        let identity = deadlineState.arm(generation: generation)
+        let workItem = DispatchWorkItem {
+            guard deadlineState.isActive(identity) else { return }
+            AppLog.shared.warn(reason)
+            // クリップボードの復元と設定の保存はapplicationWillTerminateにしかない。
+            // `_exit`はそこを通らないので、最後に時間を区切って試しておく。
+            cleanup()
+            guard deadlineState.isActive(identity) else { return }
+            // AppLogは非同期に書くため、この警告を残すには終了前に追いつかせる。
+            AppLog.shared.flush(timeout: 0.5)
+            guard deadlineState.isActive(identity) else { return }
+            exitNow()
+        }
+        hardDeadlineWorkItem = workItem
+        DispatchQueue.global().asyncAfter(deadline: .now() + interval, execute: workItem)
+    }
+
+    private func cancelHardDeadline() {
+        hardDeadlineWorkItem?.cancel()
+        hardDeadlineWorkItem = nil
+        hardDeadlineState.cancel()
+    }
+
     func replyOnce() {
-        guard state != .replied else { return }
+        replyOnce(generation: terminationGeneration)
+    }
+
+    private func replyOnce(generation: Int) {
+        guard generation == terminationGeneration, state != .replied else { return }
         state = .replied
         timeoutTask?.cancel()
+        timeoutTask = nil
+        // replyしてもAppKitが終了を取り止めることがある（ログアウトの取り消しなど）。
+        // 締切を持ち越すと、動き続けているアプリを`_exit`で殺すことになるので、
+        // teardownの安全弁は本当に終了する時だけ届くapplicationWillTerminateで張り直す。
+        cancelHardDeadline()
+        armAbandonedReplyWatchdog(generation: generation)
         reply()
+    }
+
+    /// applicationWillTerminateからだけ呼ぶ。AppKitがここまで来た時は本当に終了する
+    /// ので、reply後のteardownが固まる分だけ2段目の締切を武装する。
+    func confirmTermination() {
+        abandonedReplyTask?.cancel()
+        abandonedReplyTask = nil
+        armHardDeadline(
+            after: ApplicationTerminationDeadlinePolicy.postReplyExitInterval,
+            reason: "reply後のteardownが締切内に終わらなかったため強制終了します",
+            generation: terminationGeneration
+        )
+    }
+
+    /// 始まった終了が取り消された時に、締切ごと`.idle`へ戻す。世代を進めるので、
+    /// 遅れて完了した前の世代のshutdownはreplyしない。以後のQuitは最初からやり直せる。
+    func cancelTermination() {
+        terminationGeneration += 1
+        state = .idle
+        gracefulDeadline = nil
+        timeoutTask?.cancel()
+        timeoutTask = nil
+        abandonedReplyTask?.cancel()
+        abandonedReplyTask = nil
+        shutdownTask?.cancel()
+        shutdownTask = nil
+        cancelHardDeadline()
+    }
+
+    /// replyしたのにapplicationWillTerminateが届かない場合の戻り道。ここでは
+    /// 何も終了させず、状態と締切を通常動作へ戻すだけにする。
+    private func armAbandonedReplyWatchdog(generation: Int) {
+        abandonedReplyTask?.cancel()
+        let interval = ApplicationTerminationDeadlinePolicy.abandonedReplyInterval
+        abandonedReplyTask = Task { [weak self] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(interval * 1_000_000_000))
+            } catch {
+                return
+            }
+            guard let self, generation == self.terminationGeneration else { return }
+            AppLog.shared.info("終了要求が取り消されたため通常動作へ戻ります")
+            self.cancelTermination()
+        }
     }
 
     func handleTimeout() {
@@ -773,11 +1085,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     )
     lazy var permissionManager = PermissionManager()
+    private lazy var onboardingRestartIntentStore = OnboardingRestartIntentStore()
     private var hotkeyManager: HotkeyManager!
     private var hud: RecordingHUDController!
     private var onboardingController: OnboardingWindowController!
-    private lazy var onboardingRestartIntentStore = OnboardingRestartIntentStore()
-    private var onboardingRestartPresentationTask: Task<Void, Never>?
     private var settingsCancellable: AnyObjectHolder?
     private var autoStopTask: Task<Void, Never>?
     private var recordingStartTask: Task<Void, Never>?
@@ -800,6 +1111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var aiCommandCaptureID: UUID?
     private var aiCommandCaptureTimeoutTask: Task<Void, Never>?
     private var menuBarWarningTask: Task<Void, Never>?
+    private var didLogTerminationOrigin = false
     private var activeVoiceSession: VoiceSession? {
         didSet {
             // HotkeyManagerはFn停止を活動中のハンズフリーsessionだけへ振り分ける。
@@ -821,19 +1133,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var warmUpTask: Task<Void, Error>?
     private lazy var terminationCoordinator = ApplicationTerminationCoordinator(
         shutdown: { [weak self] in
+            guard ApplicationTerminationSubsystemPolicy.runsShutdown(
+                isDebug: OnboardingRuntimeProfile.isDebug
+            ) else { return }
             guard let self else { return }
             await self.audioRecorder.stop()
             await self.cleanupEngine.shutdown()
             await self.aiCommandEngine.shutdown()
         },
         reply: { NSApplication.shared.reply(toApplicationShouldTerminate: true) },
-        timeoutWarning: { AppLog.shared.warn("cleanupEngine.shutdownが3秒以内に完了しなかったため終了します") }
+        timeoutWarning: { AppLog.shared.warn("cleanupEngine.shutdownが3秒以内に完了しなかったため終了します") },
+        // 強制終了はapplicationWillTerminateを通らない。利用者のクリップボードに
+        // Koedexが入れた文字列を残さず、未保存の設定も落とさないよう、
+        // 時間を区切って同じ後始末だけ試す。
+        lastResortCleanup: { [weak self] in
+            ApplicationTerminationCoordinator.runBoundedOnMainThread(timeout: 1) {
+                guard let self else { return }
+                self.textInjector.restorePendingScopedClipboardIfOwned()
+                self.settingsStore.flushPendingSave()
+            }
+        }
     )
     private var consecutiveUnclassifiedRPCFailures = 0
     private static let unclassifiedRPCFailureWarningThreshold = 3
 
     @Published var menuBarIconName = "mic"
     @Published var codexStatus: CodexConnectionStatus = .unknown
+    @Published private(set) var opensDebugMainWindowAutomatically = false
     /// アクティブ化のたびに再接続を撃たないための、最後に再試行した時刻。
     private var lastCodexActivationRetryAt: Date?
     @Published private(set) var isApplyingLanguageProfile = false
@@ -864,10 +1190,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // 既存のdo/catchで捕捉できるようになる。CLIテストモード判定より前に行う必要がある。
         signal(SIGPIPE, SIG_IGN)
 
-        // Debug.appはここで通常アプリの副作用をすべて止める。これより後にはログ、履歴の
+        onboardingRestartIntentStore.cleanupOrphanedClaims()
+
+        // Debug.appはここで通常アプリの起動副作用を止める。これより後には本番ログ、履歴の
         // prune、PID掃除、hotkey、音声warm-up、Codex接続があるため、順序を変えないこと。
         if OnboardingRuntimeProfile.isDebug {
             NSApp.setActivationPolicy(.regular)
+            let bundleIdentifier = Bundle.main.bundleIdentifier ?? ""
+            let restartIntent = onboardingRestartIntentStore.load(bundleIdentifier: bundleIdentifier)
+            let restartPresentationMode = restartIntent?.presentationMode
+            let presentsRestartIntent = DebugMainWindowLaunchPolicy.presentsRestartIntent(
+                isDebug: true,
+                mode: restartPresentationMode
+            )
+            opensDebugMainWindowAutomatically = DebugMainWindowLaunchPolicy.opensAutomatically(
+                isDebug: true,
+                restartPresentationMode: restartPresentationMode
+            )
+            if let restartIntent, presentsRestartIntent {
+                let restartPermissionManager = OnboardingRestartPresentationPolicy.usesSimulatedPermissions(
+                    for: restartIntent.presentationMode
+                ) ? PermissionManager(simulatedStates: .initial) : PermissionManager()
+                onboardingController = OnboardingWindowController(
+                    permissionManager: restartPermissionManager,
+                    settingsStore: settingsStore
+                )
+                presentRestartIntent(restartIntent)
+            } else if restartIntent != nil {
+                AppLog.shared.info(DebugLaunchLogPolicy.message(
+                    restartIntent: restartIntent,
+                    forcedInitialStepApplied: false,
+                    openedStepIndex: nil
+                ))
+                onboardingRestartIntentStore.clear()
+            } else {
+                AppLog.shared.info(DebugLaunchLogPolicy.message(
+                    restartIntent: nil,
+                    forcedInitialStepApplied: false,
+                    openedStepIndex: nil
+                ))
+            }
             return
         }
 
@@ -946,7 +1308,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             if restartIntent.presentationMode.isDebug {
                 onboardingRestartIntentStore.clear()
             } else {
-                presentRestartIntentAfterSourceProcessExit(restartIntent)
+                presentRestartIntent(restartIntent)
                 return
             }
         }
@@ -992,13 +1354,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     /// DockクリックやFinderからの再オープン時は、未完了セットアップを常に優先する。
     func applicationShouldHandleReopen(
         _ sender: NSApplication,
-        hasVisibleWindows _: Bool
+        hasVisibleWindows: Bool
     ) -> Bool {
-        guard !OnboardingRuntimeProfile.isDebug else { return false }
-        permissionManager.refresh()
+        let isDebug = OnboardingRuntimeProfile.isDebug
+        if !isDebug {
+            permissionManager.refresh()
+        }
         switch DockLifecyclePolicy.reopenDestination(
-            isDebug: false,
-            allPermissionsGranted: permissionManager.allGranted(),
+            isDebug: isDebug,
+            hasVisibleWindows: hasVisibleWindows,
+            allPermissionsGranted: isDebug ? false : permissionManager.allGranted(),
             setupIsComplete: settingsStore.settings.setupProgress.isComplete
         ) {
         case .unchanged:
@@ -1020,24 +1385,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         )
     }
 
-    /// 権限反映用の後継プロセスは、旧プロセスの終了前にセットアップやマイク利用を
-    /// 始めない。旧側は自分の安全な終了処理を実行し、新側はそれを待つだけにする。
-    private func presentRestartIntentAfterSourceProcessExit(_ intent: OnboardingRestartIntent) {
-        onboardingRestartPresentationTask?.cancel()
-        onboardingRestartPresentationTask = Task { [weak self] in
-            await OnboardingRestartHandoff.waitForSourceProcessExit(intent)
-            guard !Task.isCancelled, let self else { return }
-            self.onboardingController.showRestartIntent(
-                intent,
-                onPresented: { [weak self] in
-                    self?.onboardingRestartIntentStore.clear()
-                },
-                onFinish: { [weak self] mode in
-                    self?.finishOnboarding(mode: mode)
+    /// 前回の終了前に保存した位置を、次の通常起動で一度だけ表示する。
+    private func presentRestartIntent(_ intent: OnboardingRestartIntent) {
+        onboardingController.showRestartIntent(
+            intent,
+            onPresented: { [weak self] in
+                self?.onboardingRestartIntentStore.clear()
+            },
+            onInitialStepPresented: { step, index, forcedInitialStepApplied in
+                guard OnboardingRuntimeProfile.isDebug else { return }
+                AppLog.shared.info(DebugLaunchLogPolicy.message(
+                    restartIntent: intent,
+                    forcedInitialStepApplied: forcedInitialStepApplied && step == intent.step,
+                    openedStepIndex: index
+                ))
+            },
+            onPresentationUnavailable: { [weak self] in
+                if intent.presentationMode.isDebug {
+                    AppLog.shared.info(DebugLaunchLogPolicy.message(
+                        restartIntent: intent,
+                        forcedInitialStepApplied: false,
+                        openedStepIndex: nil
+                    ))
                 }
-            )
-            self.onboardingRestartPresentationTask = nil
-        }
+                self?.onboardingRestartIntentStore.clear()
+                NotificationCenter.default.post(name: .koedexOpenSettings, object: nil)
+            },
+            onClosed: { [weak self] in
+                guard let self,
+                      DebugMainWindowLaunchPolicy.opensAfterRestartWindowClosed(
+                          isDebug: OnboardingRuntimeProfile.isDebug,
+                          restartPresentationMode: intent.presentationMode
+                      ) else { return }
+                self.opensDebugMainWindowAutomatically = true
+            },
+            onFinish: { [weak self] mode in
+                guard let self else { return }
+                if !mode.isDebug {
+                    self.finishOnboarding(mode: mode)
+                }
+            }
+        )
     }
 
     /// 設定値の空文字はnil（自動探索）として扱うためのヘルパー。
@@ -1616,15 +2004,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     func applicationWillTerminate(_ notification: Notification) {
         invalidateAICommandWebRetry(.pendingAndRunning)
+        // AppKitがここまで来た時だけ、reply後のteardownに対する締切を武装する。
+        terminationCoordinator.confirmTermination()
         if OnboardingRuntimeProfile.isDebug {
-            // Debug.appの進捗だけは保存し、本番のログ・PID・Codex終了処理には触れない。
+            // Debug.appの進捗を保存する。本番のログ・PID・Codex終了処理には触れない。
             settingsStore.flushPendingSave()
             return
         }
         AppLog.shared.info("Koedex終了処理開始")
         textInjector.restorePendingScopedClipboardIfOwned()
         autoStopTask?.cancel()
-        onboardingRestartPresentationTask?.cancel()
         recordingStartTask?.cancel()
         recordingStartTimeoutTask?.cancel()
         aiCommandCaptureTask?.cancel()
@@ -1660,10 +2049,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     /// 子プロセスのshutdownとAppKit replyは単一のstate machineへ集約する。
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if OnboardingRuntimeProfile.isDebug {
-            return .terminateNow
+        let hasSystemQuitReason = ApplicationTerminationOriginPolicy.hasSystemQuitReason(
+            in: NSAppleEventManager.shared().currentAppleEvent
+        )
+        let isUserInitiated = ApplicationTerminationOriginPolicy.isUserInitiated(
+            hasSystemQuitReason: hasSystemQuitReason
+        )
+        if !didLogTerminationOrigin {
+            AppLog.shared.info("[Termination] origin=\(isUserInitiated ? "user" : "system")")
+            didLogTerminationOrigin = true
         }
-        return terminationCoordinator.request()
+        return terminationCoordinator.request(
+            isUserInitiated: isUserInitiated
+        )
     }
 
     // MARK: - 録音パイプライン

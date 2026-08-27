@@ -98,6 +98,14 @@ final class AppLog: @unchecked Sendable {
         }
     }
 
+    /// 書込みは直列キューへ非同期に投げているため、強制終了の直前だけは時間を区切って
+    /// 追いつくのを待つ。待ち切れなくても終了は止めない。
+    func flush(timeout: TimeInterval) {
+        let semaphore = DispatchSemaphore(value: 0)
+        queue.async { semaphore.signal() }
+        _ = semaphore.wait(timeout: .now() + timeout)
+    }
+
     private func append(_ line: String) {
         guard let data = line.data(using: .utf8) else { return }
         if !FileManager.default.fileExists(atPath: fileURL.path) {

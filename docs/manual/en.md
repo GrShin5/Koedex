@@ -389,6 +389,51 @@ If that happens, there are two ways to open it:
 
 You only need to do this once per build.
 
+**Updating an existing installation**
+
+If you already have Koedex installed and want to move to a newer release, follow this.
+
+`scripts/install_app.sh`, used by the agent-assisted methods ((a) and (b)), stops with an
+error and **does not overwrite** an existing `/Applications/Koedex.app`. So updating goes in
+this order:
+
+1. Move the currently installed `Koedex.app` out of `/Applications` without deleting it (for
+   example, drag it to the Desktop).
+2. Clone the new release tag into a **fresh** folder — don't update the old clone folder in
+   place. The steps are the same ones used for (a), (b), or (c): see
+   [17. Appendix A](#17-appendix-a-let-an-ai-agent-handle-installation) or
+   [18. Appendix B](#18-appendix-b-build-from-source-yourself).
+3. Build it. If you kept the app you moved aside in step 1, add
+   `--previous-app <path to that app>` to the build command
+   (`./scripts/make_app.sh release --previous-app <path>`) so the build verifies signing
+   continuity against it and prints
+   `更新互換性OK: bundle ID、Designated Requirement、署名者証明書は連続しています。`
+4. Now that step 1 cleared `/Applications`, install the new app — either with
+   `scripts/install_app.sh` or by dragging `dist/Koedex.app` into `/Applications` yourself.
+
+**Your permissions carry over — you don't need to grant them again.** Building from this
+repository always keeps the same bundle ID and signing identity, and `scripts/make_app.sh`
+itself checks that continuity (see step 3). macOS ties the Microphone, Speech Recognition,
+and Accessibility grants to that identity rather than to the specific `.app` file, so a new
+build inherits what you already granted the old one.
+
+**But updating does not fix a permission that's already broken.** If Koedex shows a
+permission as already granted yet recording or pasting still doesn't work, and Koedex
+doesn't appear at all in System Settings → Privacy & Security →
+Microphone/Speech Recognition/Accessibility, that's a leftover macOS permission record (TCC)
+from an earlier install on this Mac — updating the app doesn't touch it. This was confirmed
+on a real affected Mac. To clear it, quit Koedex, then run these three commands **without
+`sudo`**:
+
+```bash
+tccutil reset Microphone com.koedex.app
+tccutil reset SpeechRecognition com.koedex.app
+tccutil reset Accessibility com.koedex.app
+```
+
+Then reopen Koedex and grant the three permissions again normally, as in
+[Step 3: Three permissions](#step-3-three-permissions) above.
+
 ---
 
 ## 6. First-time setup
@@ -469,8 +514,29 @@ notifications or Input Monitoring.
 | What happens when you tap something | Tapping a permission's button opens the macOS permission dialog. Choosing "Allow" adds a green checkmark |
 | What happens if you deny it | A red × appears, with a link to the relevant System Settings screen |
 | Can you retry | Only Accessibility lets you trigger the dialog again after denying it. Microphone and Speech Recognition must be enabled manually in System Settings |
-| Allowed it, but nothing changed | Press the "Restart app" button on the screen |
+| Allowed it, but nothing changed | Quit Koedex completely and open it again. See "If you used Koedex before" below |
 | Can you change it later | Yes, anytime, from System Settings → "Privacy & Security." Revoking it, though, stops Koedex from working |
+
+**"If you used Koedex before" (a permanently visible, collapsed section)**
+
+Below the permission list, this step always shows a collapsed section headed "> If you
+used Koedex before" (closed by default). Expanding it reveals one line:
+
+> If permissions allowed above do not appear here, quit Koedex and open it again.
+
+Below that line is a button labeled **"Quit Koedex, then open it again."** Pressing it
+quits Koedex immediately. **It does not relaunch automatically.** Open Koedex again
+yourself; setup resumes at the step you were on when it quit.
+
+If this Mac had an earlier copy of Koedex installed, the screen can show a permission as
+already granted even though recording or pasting does not actually work. That happens
+because an old macOS permission (TCC) record is still in place, and this section exists to
+point you at the fix. For the full explanation and the recovery commands, see
+[5. Get the app](#5-get-the-app), "Updating an existing installation."
+
+![Step 3 If you used Koedex before](images/en/onboarding-03-previous-install.png)
+
+A close-up of this collapsed section and the "Quit Koedex, then open it again" button.
 
 ### Step 4: Microphone and launch key
 
@@ -2118,7 +2184,7 @@ need to look for or click, instead of asking me questions that only use engineer
 
 PINNED SOURCE
 - Official URL: https://github.com/GrShin5/Koedex.git
-- Release tag: v0.1.6
+- Release tag: v0.1.7
 - Verification method: GitHub immutable release
 
 WORKING LOCATION
@@ -2141,15 +2207,15 @@ HOW TO PROCEED
   ZIP download, or installation method.
 
 FETCH AND VERIFY
-1. Clone v0.1.6 into the new destination using a command equivalent to:
-   git clone --branch v0.1.6 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
+1. Clone v0.1.7 into the new destination using a command equivalent to:
+   git clone --branch v0.1.7 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
 2. Before running any repository script, verify all of the following:
    - origin's fetch URL matches https://github.com/GrShin5/Koedex.git
      (you may treat only a trailing .git as equivalent during comparison)
-   - the local v0.1.6 tag's commit exactly equals HEAD
-   - refs/tags/v0.1.6 returned by git ls-remote against the official URL exactly equals HEAD
-   - GitHub's official releases/tags/v0.1.6 API reports tag_name=v0.1.6 and immutable=true
-   - if GitHub CLI is already available, gh release verify v0.1.6 --repo GrShin5/Koedex also succeeds
+   - the local v0.1.7 tag's commit exactly equals HEAD
+   - refs/tags/v0.1.7 returned by git ls-remote against the official URL exactly equals HEAD
+   - GitHub's official releases/tags/v0.1.7 API reports tag_name=v0.1.7 and immutable=true
+   - if GitHub CLI is already available, gh release verify v0.1.7 --repo GrShin5/Koedex also succeeds
    - the checkout is clean and has no untracked files
 3. If any value differs, the release is missing or not immutable, or a value cannot be
    verified, do not run a repository script. Report the values you could verify in a table
@@ -2237,12 +2303,12 @@ swift --version
 ### Step 1: Clone the repository
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_EN -->
-Clone only the single point tagged `v0.1.6` from the official repository. Do not take the latest
+Clone only the single point tagged `v0.1.7` from the official repository. Do not take the latest
 state (`main`) — take this release and nothing else. Do not run this where a folder named `Koedex`
 already exists.
 
 ```bash
-git clone --branch v0.1.6 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.1.7 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -2252,7 +2318,7 @@ Inside the folder the clone created, paste and run the following as-is.
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.1.6"
+EXPECTED_TAG="v0.1.7"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -2278,11 +2344,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 If even one ❌ appears, stop there. Do not switch to a different URL, a different tag, a ZIP
 download, a mirror, or any other way of obtaining the source.
 
-A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.6` is published as
+A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.7` is published as
 an immutable release. If you have the GitHub CLI, you can confirm the same thing with:
 
 ```bash
-gh release verify v0.1.6 --repo GrShin5/Koedex
+gh release verify v0.1.7 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_EN -->
 
@@ -2363,8 +2429,8 @@ Once it launches, continue with [6. First-time setup](#6-first-time-setup).
 
 | Item | Detail |
 | --- | --- |
-| Release covered | v0.1.6 |
-| App version covered | 0.1.6 |
+| Release covered | v0.1.7 |
+| App version covered | 0.1.7 |
 | Manual language | English |
 
 This manual was written against the source code in the release above. Newer versions may

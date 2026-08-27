@@ -122,7 +122,6 @@ if [[ "$CONFIGURATION" == "release" ]]; then
     exit 3
   fi
   BIN_PATH=".build/release/Koedex"
-  HELPER_BIN_PATH=".build/release/KoedexRelaunchHelper"
 else
   echo "=== swift build (debug) ==="
   if ! swift build; then
@@ -131,7 +130,6 @@ else
     exit 3
   fi
   BIN_PATH=".build/debug/Koedex"
-  HELPER_BIN_PATH=".build/debug/KoedexRelaunchHelper"
 fi
 
 if [[ "$CONFIGURATION" == "onboarding-debug" ]]; then
@@ -246,7 +244,6 @@ STAGING_DIRECTORY="$(mktemp -d "$ROOT_DIR/dist/.koedex-staging.XXXXXX")"
 APP_DIR="$STAGING_DIRECTORY/$APP_NAME"
 CONTENTS_DIR="$APP_DIR/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
-HELPERS_DIR="$CONTENTS_DIR/Helpers"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 PREVIOUS_TARGET_BACKUP=""
 REPLACEMENT_COMMITTED=false
@@ -265,14 +262,13 @@ cleanup_staging() {
 trap cleanup_staging EXIT
 
 echo "=== .appバンドルを検証用ステージングへ組み立て ==="
-mkdir -p "$MACOS_DIR" "$HELPERS_DIR" "$RESOURCES_DIR"
+mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 # 起動時ログで、更新直後の挙動を実際に起動した成果物と対応付けられるようにする。
 # 取得できない配布環境でもビルド自体は止めない。
 BUILD_GIT_SHA="$(git -C "$ROOT_DIR" rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')"
 
 cp "$BIN_PATH" "$MACOS_DIR/Koedex"
-cp "$HELPER_BIN_PATH" "$HELPERS_DIR/KoedexRelaunchHelper"
 
 # swift buildが生成したリソースバンドル（Koedex_Koedex.bundle等）を同梱する。
 BUILD_DIR="$(dirname "$BIN_PATH")"
@@ -306,9 +302,9 @@ cat > "$CONTENTS_DIR/Info.plist" << PLIST
     <key>CFBundleIdentifier</key>
     <string>$BUNDLE_IDENTIFIER</string>
     <key>CFBundleVersion</key>
-    <string>0.1.6</string>
+    <string>0.1.7</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.6</string>
+    <string>0.1.7</string>
     <key>KoedexBuildGitSHA</key>
     <string>$BUILD_GIT_SHA</string>
     <key>CFBundlePackageType</key>
@@ -335,15 +331,6 @@ PLIST
 # iCloud同期下で拡張属性（com.apple.fileprovider.dir#N等）が付いたまま作業していると、
 # codesignが "resource fork, Finder information, or similar detritus not allowed" で失敗するため。
 xattr -cr "$APP_DIR"
-
-if ! codesign --force --sign "$SIGN_IDENTITY" "$HELPERS_DIR/KoedexRelaunchHelper"; then
-  echo "=== 失敗: helperのコード署名に失敗しました ===" >&2
-  exit 4
-fi
-if ! codesign --verify --strict --verbose=2 "$HELPERS_DIR/KoedexRelaunchHelper"; then
-  echo "=== 失敗: helper単体のコード署名を検証できませんでした ===" >&2
-  exit 4
-fi
 
 if ! codesign --force --sign "$SIGN_IDENTITY" "$APP_DIR"; then
   echo "=== 失敗: コード署名に失敗しました ===" >&2

@@ -39,10 +39,9 @@ struct OnboardingView: View {
     @ObservedObject var settingsStore: SettingsStore
     let mode: OnboardingPresentationMode
     let forcedInitialStep: OnboardingStep?
-    let initialRestartFeedback: String?
     let onForcedInitialStepPresented: (() -> Void)?
-    let onRestartPreparationCompleted: () -> Void
-    let onRestartFailure: () -> Void
+    let onInitialStepPresented: ((OnboardingStep, Int, Bool) -> Void)?
+    let onQuitPreparationCompleted: () -> Void
     let onFinish: () -> Void
 
     @StateObject private var microphoneProbe = MicrophoneLevelProbe()
@@ -64,8 +63,10 @@ struct OnboardingView: View {
     @State private var microphoneCheckState: OnboardingMicrophoneCheckState = .idle
     @State private var microphoneCheckGeneration = UUID()
     @State private var microphoneProbeOperation: Task<Void, Never>?
-    @State private var appRestartFeedback: String?
+    @State private var appQuitFeedback: String?
+    @State private var showsAppQuitConfirmation = false
     @State private var didAcknowledgeForcedInitialStep = false
+    @State private var didReportInitialStep = false
     @State private var hasMoreScrollableContent = false
     @State private var clipboardVariantOnboardingMessage: String?
 
@@ -93,10 +94,9 @@ struct OnboardingView: View {
         settingsStore: SettingsStore,
         mode: OnboardingPresentationMode,
         forcedInitialStep: OnboardingStep?,
-        initialRestartFeedback: String? = nil,
         onForcedInitialStepPresented: (() -> Void)?,
-        onRestartPreparationCompleted: @escaping () -> Void,
-        onRestartFailure: @escaping () -> Void,
+        onInitialStepPresented: ((OnboardingStep, Int, Bool) -> Void)? = nil,
+        onQuitPreparationCompleted: @escaping () -> Void,
         onFinish: @escaping () -> Void,
         practiceTranscriptionEngine: TranscriptionEngine? = nil
     ) {
@@ -104,19 +104,15 @@ struct OnboardingView: View {
         self.settingsStore = settingsStore
         self.mode = mode
         self.forcedInitialStep = forcedInitialStep
-        self.initialRestartFeedback = initialRestartFeedback
         self.onForcedInitialStepPresented = onForcedInitialStepPresented
-        self.onRestartPreparationCompleted = onRestartPreparationCompleted
-        self.onRestartFailure = onRestartFailure
+        self.onInitialStepPresented = onInitialStepPresented
+        self.onQuitPreparationCompleted = onQuitPreparationCompleted
         self.onFinish = onFinish
         _practiceController = StateObject(
             wrappedValue: OnboardingPracticeController(
                 transcriptionEngine: practiceTranscriptionEngine ?? TranscriptionEngine()
             )
         )
-        _appRestartFeedback = State(initialValue: initialRestartFeedback.map {
-            AppLocalizer.text($0, language: settingsStore.settings.languagePreferences.uiLanguage)
-        })
     }
 
     private var steps: [OnboardingStep] {
@@ -252,6 +248,20 @@ struct OnboardingView: View {
         .onDisappear {
             stopInteractiveChecks()
         }
+        .sheet(isPresented: $showsAppQuitConfirmation) {
+            AppConfirmationSheet(
+                title: uiText("Koedexを終了しますか？"),
+                message: uiText("Koedexを終了します。反映するには、もう一度Koedexを開いてください。"),
+                confirmTitle: uiText("終了する"),
+                confirmRole: .destructive,
+                metrics: PopupUIScaleMetrics(settingsMetrics: SettingsUIScaleMetrics(
+                    scale: SettingsUIScaleMetrics.standardScale,
+                    language: uiLanguage
+                )),
+                onConfirm: requestApplicationQuit,
+                onCancel: {}
+            )
+        }
         .environment(\.locale, settingsStore.settings.languagePreferences.uiLanguage.locale)
     }
 
@@ -280,27 +290,28 @@ struct OnboardingView: View {
         switch currentStep {
         case .language:
             languageSelectionContent
+                .onAppear { handleStepPresented(.language) }
         case .welcome:
             welcomeContent
-                .onAppear { acknowledgeForcedInitialStepIfNeeded(visibleStep: .welcome) }
+                .onAppear { handleStepPresented(.welcome) }
         case .permissions:
             permissionsContent
-                .onAppear { acknowledgeForcedInitialStepIfNeeded(visibleStep: .permissions) }
+                .onAppear { handleStepPresented(.permissions) }
         case .voice:
             voiceContent
-                .onAppear { acknowledgeForcedInitialStepIfNeeded(visibleStep: .voice) }
+                .onAppear { handleStepPresented(.voice) }
         case .preferences:
             preferencesContent
-                .onAppear { acknowledgeForcedInitialStepIfNeeded(visibleStep: .preferences) }
+                .onAppear { handleStepPresented(.preferences) }
         case .aiCommand:
             aiCommandContent
-                .onAppear { acknowledgeForcedInitialStepIfNeeded(visibleStep: .aiCommand) }
+                .onAppear { handleStepPresented(.aiCommand) }
         case .practice:
             practiceContent
-                .onAppear { acknowledgeForcedInitialStepIfNeeded(visibleStep: .practice) }
+                .onAppear { handleStepPresented(.practice) }
         case .complete:
             completeContent
-                .onAppear { acknowledgeForcedInitialStepIfNeeded(visibleStep: .complete) }
+                .onAppear { handleStepPresented(.complete) }
         }
     }
 
@@ -450,13 +461,25 @@ struct OnboardingView: View {
                 onRequest: { _ = permissionManager.requestAccessibility() }
             )
 
-            if permissionManager.accessibilityState != .authorized, !mode.isPreview {
+            DisclosureGroup(uiText("以前のKoedexを使っていた場合")) {
                 VStack(alignment: .leading, spacing: uiMetrics.layout(6)) {
-                    Label(uiText("現在起動中のKoedexを確認"), systemImage: "app.badge.checkmark")
-                        .font(uiMetrics.font(.headline))
-                    Text(uiText("以前の開発版を使っていた場合、macOSの一覧に「Koedex」が残っていても、以前の署名のアプリを指していると現在起動中のアプリには許可が反映されません。安定署名版へ移行する最初の一度だけは、旧項目を削除してからこのアプリを許可し直す必要がある場合があります。"))
+                    Text(uiText("このMacに以前のKoedexが入っていた場合、macOSに古いアプリの権限記録が残ることがあります。そのときは権限が「許可済み」と表示されても何も動かず、システム設定のプライバシー一覧にKoedexが表示されないことがあります。"))
                         .font(uiMetrics.font(.caption))
                         .foregroundStyle(.secondary)
+                    Text(uiText("Koedexを終了してから、ターミナルで次の3つのコマンドを実行してください。その後Koedexを開き直し、表示される権限を通常どおり許可してください。Koedexがこれらのコマンドを実行することはありません。"))
+                        .font(uiMetrics.font(.caption))
+                        .foregroundStyle(.secondary)
+                    Text("tccutil reset Microphone \(runningBundleIdentifier)")
+                        .font(uiMetrics.font(.monospacedCaption))
+                        .textSelection(.enabled)
+                    Text("tccutil reset SpeechRecognition \(runningBundleIdentifier)")
+                        .font(uiMetrics.font(.monospacedCaption))
+                        .textSelection(.enabled)
+                    Text("tccutil reset Accessibility \(runningBundleIdentifier)")
+                        .font(uiMetrics.font(.monospacedCaption))
+                        .textSelection(.enabled)
+                    Label(uiText("現在起動中のKoedexを確認"), systemImage: "app.badge.checkmark")
+                        .font(uiMetrics.font(.caption))
                     Text(Bundle.main.bundleURL.path)
                         .font(uiMetrics.font(.monospacedCaption))
                         .foregroundStyle(.secondary)
@@ -470,17 +493,17 @@ struct OnboardingView: View {
                 .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
             }
 
-            Text(uiText("上記で許可した権限が画面に反映されない場合は、下のボタンからアプリを再起動してください。"))
+            Text(uiText("上記で許可した権限が画面に反映されない場合は、Koedexを終了し、もう一度開いてください。"))
                 .font(uiMetrics.font(.caption))
                 .foregroundStyle(.secondary)
-            Button(uiText(restartCoordinator.isRestarting ? "アプリを再起動しています…" : "アプリの再起動")) {
-                requestApplicationRestart()
+            Button(uiText(restartCoordinator.isQuitting ? "Koedexを終了しています…" : "Koedexを終了して、もう一度開く")) {
+                showsAppQuitConfirmation = true
             }
             .font(uiMetrics.font(.caption))
-            .disabled(restartCoordinator.isRestarting)
+            .disabled(restartCoordinator.isQuitting)
 
-            if let appRestartFeedback {
-                Text(appRestartFeedback)
+            if let appQuitFeedback {
+                Text(appQuitFeedback)
                     .font(uiMetrics.font(.caption))
                     .foregroundStyle(.orange)
             }
@@ -501,6 +524,10 @@ struct OnboardingView: View {
 
     private var accessibilityApplicationName: String {
         mode.isLiveDebugRehearsal ? "Koedex Debug" : "Koedex"
+    }
+
+    private var runningBundleIdentifier: String {
+        Bundle.main.bundleIdentifier ?? "com.koedex.app"
     }
 
     @ViewBuilder
@@ -1159,27 +1186,40 @@ struct OnboardingView: View {
         }
     }
 
+    private func handleStepPresented(_ visibleStep: OnboardingStep) {
+        DispatchQueue.main.async {
+            guard currentStep == visibleStep else { return }
+            if !didReportInitialStep {
+                didReportInitialStep = true
+                onInitialStepPresented?(
+                    visibleStep,
+                    currentStepIndex,
+                    forcedInitialStep == visibleStep
+                )
+            }
+            acknowledgeForcedInitialStepIfNeeded(visibleStep: visibleStep)
+        }
+    }
+
     private func markStepComplete(_ step: OnboardingStep) {
         guard mode.persistsStepProgress else { return }
         settingsStore.settings.setupProgress.completedStepIDs.insert(step.rawValue)
         settingsStore.flushPendingSave()
     }
 
-    private func requestApplicationRestart() {
-        appRestartFeedback = nil
-        restartCoordinator.restart(
+    private func requestApplicationQuit() {
+        appQuitFeedback = nil
+        restartCoordinator.quitAndResumeOnNextLaunch(
             mode: mode,
+            step: currentStep,
             settingsStore: settingsStore,
-            prepareForRestart: {
-                await stopInteractiveChecksForRestart()
+            prepareForQuit: {
+                await stopInteractiveChecksForQuit()
             },
-            suspendOnboardingWindow: onRestartPreparationCompleted,
-            restoreOnboardingWindowAfterFailure: onRestartFailure
-        ) { result in
-            if case .failure = result {
-                AppLog.shared.warn("オンボーディングの再起動に失敗しました")
-                appRestartFeedback = uiText("アプリを再起動できませんでした。少し待ってから、もう一度試してください。")
-            }
+            suspendOnboardingWindow: onQuitPreparationCompleted
+        ) { error in
+            AppLog.shared.warn("オンボーディングの終了準備に失敗しました")
+            appQuitFeedback = uiText(error.localizedDescription)
         }
     }
 
@@ -1238,9 +1278,8 @@ struct OnboardingView: View {
         stopMicrophoneCheck()
     }
 
-    /// 再起動だけは旧プロセスが録音を保持したまま次の.appを起動しないよう、
-    /// すべての対話的な確認処理の停止をawaitしてからコーディネーターへ戻す。
-    private func stopInteractiveChecksForRestart() async -> Bool {
+    /// 終了前に、すべての対話的な確認処理の停止をawaitする。
+    private func stopInteractiveChecksForQuit() async -> Bool {
         stopShortcutCapture()
         await practiceController.resetAndWait()
         await stopMicrophoneCheckAndWait()
@@ -1903,16 +1942,24 @@ private final class MicrophoneLevelProbe: ObservableObject {
     }
 }
 
+/// 再開後の表示モードに応じて、Debugの安全な権限経路を選ぶ規則。
+enum OnboardingRestartPresentationPolicy {
+    static func presents(_ mode: OnboardingPresentationMode) -> Bool { !mode.isGuide }
+    static func usesSimulatedPermissions(for mode: OnboardingPresentationMode) -> Bool { mode.isPreview }
+    static func startsPermissionPolling(for mode: OnboardingPresentationMode) -> Bool { !mode.isPreview }
+    static func defersWindowCloseAfterCompletion(for mode: OnboardingPresentationMode) -> Bool { mode.isDebug }
+}
+
 /// OnboardingViewを保持するオーナー。通常アプリでは必要な時だけウィンドウを表示する。
 @MainActor
 final class OnboardingWindowController: NSObject, NSWindowDelegate {
     private var window: NSWindow?
-    private var suspendedRestartWindow: NSWindow?
     private let permissionManager: PermissionManager
     private let settingsStore: SettingsStore
     private let practiceTranscriptionEngine: TranscriptionEngine?
     private var startsPermissionPolling = false
     private var didTearDownWindow = false
+    private var onWindowClosed: (() -> Void)?
 
     init(
         permissionManager: PermissionManager,
@@ -1940,20 +1987,27 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         show(mode: mode, startsPolling: true, onFinish: { onFinish(mode) })
     }
 
-    /// 権限反映のための再起動後だけ、保存済みの意図に従って権限ページを強制表示する。
+    /// 終了後の再開時だけ、保存済みの意図に従って直前のページを強制表示する。
     func showRestartIntent(
         _ intent: OnboardingRestartIntent,
         onPresented: @escaping () -> Void,
+        onInitialStepPresented: @escaping (OnboardingStep, Int, Bool) -> Void,
+        onPresentationUnavailable: @escaping () -> Void,
+        onClosed: @escaping () -> Void,
         onFinish: @escaping (OnboardingPresentationMode) -> Void
     ) {
         let mode = intent.presentationMode
-        guard !mode.isDebug, !mode.isGuide else { return }
+        guard OnboardingRestartPresentationPolicy.presents(mode) else {
+            onPresentationUnavailable()
+            return
+        }
         show(
             mode: mode,
             forcedInitialStep: intent.step,
-            initialRestartFeedback: OnboardingRestartFeedbackPolicy.initialFeedbackKey(for: intent),
-            startsPolling: true,
+            startsPolling: OnboardingRestartPresentationPolicy.startsPermissionPolling(for: mode),
             onForcedInitialStepPresented: onPresented,
+            onInitialStepPresented: onInitialStepPresented,
+            onWindowClosed: onClosed,
             onFinish: { onFinish(mode) }
         )
     }
@@ -1966,9 +2020,10 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
     private func show(
         mode: OnboardingPresentationMode,
         forcedInitialStep: OnboardingStep? = nil,
-        initialRestartFeedback: String? = nil,
         startsPolling: Bool,
         onForcedInitialStepPresented: (() -> Void)? = nil,
+        onInitialStepPresented: ((OnboardingStep, Int, Bool) -> Void)? = nil,
+        onWindowClosed: (() -> Void)? = nil,
         onFinish: @escaping () -> Void
     ) {
         if let window {
@@ -1982,17 +2037,22 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
             settingsStore: settingsStore,
             mode: mode,
             forcedInitialStep: forcedInitialStep,
-            initialRestartFeedback: initialRestartFeedback,
             onForcedInitialStepPresented: onForcedInitialStepPresented,
-            onRestartPreparationCompleted: { [weak self] in
-                self?.suspendForRestart()
-            },
-            onRestartFailure: { [weak self] in
-                self?.restoreAfterRestartFailure()
+            onInitialStepPresented: onInitialStepPresented,
+            onQuitPreparationCompleted: { [weak self] in
+                self?.suspendForQuit()
             },
             onFinish: { [weak self] in
-                self?.closeAfterCompletion()
-                onFinish()
+                guard let self else { return }
+                if OnboardingRestartPresentationPolicy.defersWindowCloseAfterCompletion(for: mode) {
+                    onFinish()
+                    DispatchQueue.main.async { [weak self] in
+                        self?.closeAfterCompletion()
+                    }
+                } else {
+                    self.closeAfterCompletion()
+                    onFinish()
+                }
             },
             practiceTranscriptionEngine: practiceTranscriptionEngine
         )
@@ -2015,6 +2075,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         self.window = window
         startsPermissionPolling = startsPolling
         didTearDownWindow = false
+        self.onWindowClosed = onWindowClosed
 
         NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
@@ -2036,25 +2097,13 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         closingWindow?.close()
     }
 
-    /// 新しい.appの起動を要求する前に、旧ウィンドウを一度だけ画面から外す。
-    /// closeではなくorderOutにするため、起動失敗時は同じ進捗・同じ画面へ戻せる。
-    private func suspendForRestart() {
+    /// 再開位置の保存と対話的な確認の停止後に、終了前のウィンドウを画面から外す。
+    private func suspendForQuit() {
         guard let window else { return }
-        suspendedRestartWindow = window
-        tearDownWindow()
+        onWindowClosed = nil
         window.orderOut(nil)
-    }
-
-    private func restoreAfterRestartFailure() {
-        guard let window = suspendedRestartWindow else { return }
-        suspendedRestartWindow = nil
-        self.window = window
-        didTearDownWindow = false
-        startsPermissionPolling = true
-        NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        permissionManager.startPolling()
+        tearDownWindow()
+        window.close()
     }
 
     private func tearDownWindow() {
@@ -2067,9 +2116,12 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         }
         window = nil
         startsPermissionPolling = false
+        let onWindowClosed = onWindowClosed
+        self.onWindowClosed = nil
         // 通常版はDock常駐を維持する。Debug.appは従来どおりregularのままにする。
         if !OnboardingRuntimeProfile.isDebug {
             NSApp.setActivationPolicy(.regular)
         }
+        onWindowClosed?()
     }
 }

@@ -1,9 +1,8 @@
 import AppKit
 import Combine
-import Darwin
 import Foundation
 
-/// 権限反映のための再起動で、一度だけ復帰するオンボーディング表示先。
+/// 権限反映のために終了した後、次回起動で一度だけ復帰するオンボーディング表示先。
 /// 設定スキーマへ混ぜず、Application Support内の専用ファイルへ保存する。
 struct OnboardingRestartIntent: Codable, Equatable {
     enum Route: String, Codable, Equatable {
@@ -14,48 +13,19 @@ struct OnboardingRestartIntent: Codable, Equatable {
         case debugRehearsal
     }
 
-    /// helperの結果を次の手動起動でも安全に復帰させるための、後方互換な記録。
-    enum HandoffStatus: String, Codable, Equatable {
-        case pending
-        case helperLaunched
-        case helperFailed
-    }
-
-    enum HandoffFailure: String, Codable, Equatable {
-        case helperUnavailable
-        case helperValidationFailed
-        case sourceExitTimedOut
-        case successorLaunchFailed
-    }
-
     let route: Route
     let step: OnboardingStep
     let bundleIdentifier: String
-    /// 後継プロセスが旧プロセスの終了を確認してからUIを表示するための情報。
-    /// 旧版が書いたintentも読めるようoptionalにしている。
-    let sourceProcessIdentifier: Int32?
-    let generation: UUID?
-    /// 旧版のintentを読めるよう、これらはoptionalのまま追加する。
-    let createdAt: Date?
-    let expiresAt: Date?
-    var handoffStatus: HandoffStatus?
-    var handoffFailure: HandoffFailure?
 
     init?(
         mode: OnboardingPresentationMode,
-        step: OnboardingStep = .permissions,
+        step: OnboardingStep,
         bundleIdentifier: String
     ) {
         guard let route = mode.restartRoute else { return nil }
         self.route = route
         self.step = step
         self.bundleIdentifier = bundleIdentifier
-        self.sourceProcessIdentifier = ProcessInfo.processInfo.processIdentifier
-        self.generation = UUID()
-        self.createdAt = Date()
-        self.expiresAt = Date().addingTimeInterval(OnboardingRestartHandoff.maximumWaitInterval)
-        self.handoffStatus = .pending
-        self.handoffFailure = nil
     }
 
     var presentationMode: OnboardingPresentationMode {
@@ -90,34 +60,54 @@ extension OnboardingPresentationMode {
     }
 }
 
-/// 再起動意図を読み書きする小さなストア。壊れた・別アプリ用の内容は再利用しない。
+enum OnboardingRestartIntentFilePolicy {
+    static func isOrphanedClaim(
+        _ candidate: URL,
+        canonicalURL: URL,
+        isDirectory: Bool = false
+    ) -> Bool {
+        let canonicalParent = canonicalURL.deletingLastPathComponent().standardizedFileURL
+        let candidateParent = candidate.deletingLastPathComponent().standardizedFileURL
+        let prefix = "\(canonicalURL.lastPathComponent).claim-"
+        return candidate.isFileURL
+            && !isDirectory
+            && candidateParent == canonicalParent
+            && candidate.lastPathComponent.hasPrefix(prefix)
+    }
+}
+
+/// 次回起動の復帰位置を読み書きする小さなストア。
+/// 壊れた内容・別アプリ用の内容は再利用しない。
 final class OnboardingRestartIntentStore {
-    private let fileURL: URL
+    private let canonicalFileURL: URL
     private let fileManager: FileManager
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
     init(
-        fileURL: URL = OnboardingRuntimeProfile.restartIntentURL,
+        fileURL: URL? = nil,
         fileManager: FileManager = .default
     ) {
-        self.fileURL = fileURL
+        canonicalFileURL = fileURL ?? OnboardingRuntimeProfile.restartIntentURL
         self.fileManager = fileManager
     }
 
     func save(_ intent: OnboardingRestartIntent) throws {
         // セットアップ中はこの経路がストレージルートを最初に作ることがある。
         // ここで0700にしておかないと、次回起動の是正までルートが0755のまま残る。
-        StoragePermissions.ensureDirectory(at: fileURL.deletingLastPathComponent())
+        StoragePermissions.ensureDirectory(at: canonicalFileURL.deletingLastPathComponent())
         let data = try encoder.encode(intent)
-        try data.write(to: fileURL, options: .atomic)
-        StoragePermissions.applyFileMode(to: fileURL)
+        try data.write(to: canonicalFileURL, options: .atomic)
+        StoragePermissions.applyFileMode(to: canonicalFileURL)
     }
 
     func load(bundleIdentifier: String) -> OnboardingRestartIntent? {
-        guard fileManager.fileExists(atPath: fileURL.path) else { return nil }
+        guard fileManager.fileExists(atPath: canonicalFileURL.path) else { return nil }
         do {
-            let intent = try decoder.decode(OnboardingRestartIntent.self, from: Data(contentsOf: fileURL))
+            let intent = try decoder.decode(
+                OnboardingRestartIntent.self,
+                from: Data(contentsOf: canonicalFileURL)
+            )
             guard intent.matches(bundleIdentifier: bundleIdentifier) else {
                 clear()
                 return nil
@@ -130,20 +120,40 @@ final class OnboardingRestartIntentStore {
     }
 
     func clear() {
-        try? fileManager.removeItem(at: fileURL)
+        try? fileManager.removeItem(at: canonicalFileURL)
     }
 
-    func recordHelperFailure(
-        _ failure: OnboardingRestartIntent.HandoffFailure,
-        for intent: OnboardingRestartIntent
-    ) {
-        var failedIntent = intent
-        failedIntent.handoffStatus = .helperFailed
-        failedIntent.handoffFailure = failure
+    func cleanupOrphanedClaims() {
+        let directoryURL = canonicalFileURL.deletingLastPathComponent()
+        guard fileManager.fileExists(atPath: directoryURL.path) else { return }
+        let children: [URL]
         do {
-            try save(failedIntent)
+            children = try fileManager.contentsOfDirectory(
+                at: directoryURL,
+                includingPropertiesForKeys: nil,
+                options: []
+            )
         } catch {
-            AppLog.shared.warn("[OnboardingRestartCoordinator] helper failure state save failed: \(AppLog.safeDescription(error))")
+            AppLog.shared.warn(
+                "[OnboardingRestartIntentStore] orphan cleanup enumeration failed: \(AppLog.safeDescription(error))"
+            )
+            return
+        }
+        for child in children {
+            var isDirectory: ObjCBool = false
+            guard fileManager.fileExists(atPath: child.path, isDirectory: &isDirectory),
+                  OnboardingRestartIntentFilePolicy.isOrphanedClaim(
+                      child,
+                      canonicalURL: canonicalFileURL,
+                      isDirectory: isDirectory.boolValue
+                  ) else { continue }
+            do {
+                try fileManager.removeItem(at: child)
+            } catch {
+                AppLog.shared.warn(
+                    "[OnboardingRestartIntentStore] orphan cleanup remove failed: \(AppLog.safeDescription(error))"
+                )
+            }
         }
     }
 }
@@ -152,98 +162,19 @@ enum OnboardingRestartError: LocalizedError, Equatable {
     case unsupportedMode
     case applicationBundleUnavailable
     case interactiveChecksDidNotStop
-    case launchFailed
+    case intentSaveFailed
 
     var errorDescription: String? {
         switch self {
         case .unsupportedMode:
-            return "この画面ではアプリを再起動できません。"
+            return "この画面では終了後の再開位置を保存できません。"
         case .applicationBundleUnavailable:
-            return "アプリ本体を見つけられなかったため、再起動できませんでした。"
+            return "アプリ本体の情報を確認できないため、Koedexを終了できませんでした。"
         case .interactiveChecksDidNotStop:
-            return "録音やキー確認の停止を確認できなかったため、再起動を中止しました。少し待ってから、もう一度試してください。"
-        case .launchFailed:
-            return "新しいアプリを起動できませんでした。少し待ってから、もう一度試してください。"
+            return "録音やキー確認の停止を確認できないため、終了を中止しました。少し待ってから、もう一度試してください。"
+        case .intentSaveFailed:
+            return "再開位置を保存できないため、Koedexを終了できませんでした。"
         }
-    }
-}
-
-/// 旧プロセスが残っている間に後継側がセットアップUIや録音を始めないための、
-/// 小さくテスト可能なPID判定。OS上のプロセス生成そのものを完全に直列化する
-/// のではなく、ユーザーに見えるウィンドウとマイク利用を一つに保つ。
-enum OnboardingRestartHandoff {
-    static let pollIntervalNanoseconds: UInt64 = 100_000_000
-    static let maximumWaitInterval: TimeInterval = 15
-
-    enum SourceProcessState: Equatable {
-        case exited
-        case alive
-        case timedOut
-    }
-
-    static func shouldWaitForSourceProcessExit(
-        _ intent: OnboardingRestartIntent,
-        currentProcessIdentifier: Int32 = ProcessInfo.processInfo.processIdentifier,
-        isProcessAlive: (Int32) -> Bool = isProcessAlive
-    ) -> Bool {
-        guard let sourcePID = intent.sourceProcessIdentifier,
-              sourcePID > 0,
-              sourcePID != currentProcessIdentifier else {
-            return false
-        }
-        return isProcessAlive(sourcePID)
-    }
-
-    static func waitForSourceProcessExit(_ intent: OnboardingRestartIntent) async {
-        while shouldWaitForSourceProcessExit(intent) {
-            if let expiresAt = intent.expiresAt, Date() >= expiresAt { return }
-            do {
-                try await Task.sleep(nanoseconds: pollIntervalNanoseconds)
-            } catch {
-                return
-            }
-        }
-    }
-
-    static func sourceProcessState(
-        _ intent: OnboardingRestartIntent,
-        now: Date = Date(),
-        currentProcessIdentifier: Int32 = ProcessInfo.processInfo.processIdentifier,
-        isProcessAlive: (Int32) -> Bool = isProcessAlive
-    ) -> SourceProcessState {
-        if let expiresAt = intent.expiresAt, now >= expiresAt { return .timedOut }
-        return shouldWaitForSourceProcessExit(
-            intent,
-            currentProcessIdentifier: currentProcessIdentifier,
-            isProcessAlive: isProcessAlive
-        ) ? .alive : .exited
-    }
-
-    /// helperへ渡す値が保存済みintentと完全に対応するかを、起動前にも確認する。
-    static func validatesHelperInvocation(
-        intent: OnboardingRestartIntent,
-        bundleIdentifier: String,
-        sourcePID: Int32,
-        generation: UUID,
-        createdAt: Date,
-        expiresAt: Date,
-        now: Date = Date()
-    ) -> Bool {
-        intent.bundleIdentifier == bundleIdentifier
-            && intent.sourceProcessIdentifier == sourcePID
-            && intent.generation == generation
-            && intent.createdAt == createdAt
-            && intent.expiresAt == expiresAt
-            && now < expiresAt
-    }
-
-    private static func isProcessAlive(_ processIdentifier: Int32) -> Bool {
-        guard processIdentifier > 0 else { return false }
-        if Darwin.kill(processIdentifier, 0) == 0 {
-            return true
-        }
-        // EPERM means the process exists but this process cannot inspect it.
-        return errno == EPERM
     }
 }
 
@@ -261,21 +192,13 @@ private final class RestartPreparationGate: @unchecked Sendable {
 }
 
 enum OnboardingRestartRequestPolicy {
-    static func permitsRestart(isRestarting: Bool) -> Bool { !isRestarting }
+    static func permitsRestart(isQuitting: Bool) -> Bool { !isQuitting }
 }
 
-enum OnboardingRestartFeedbackPolicy {
-    static let helperFailureText = "アプリを再起動できませんでした。少し待ってから、もう一度試してください。"
-
-    static func initialFeedbackKey(for intent: OnboardingRestartIntent) -> String? {
-        intent.handoffStatus == .helperFailed ? helperFailureText : nil
-    }
-}
-
-/// restart helperを起動してから、現在のプロセスを安全に終了する。
+/// 再開位置を保存し、対話的な確認を停止してから現在のプロセスを終了する。
 @MainActor
 final class OnboardingRestartCoordinator: ObservableObject {
-    @Published private(set) var isRestarting = false
+    @Published private(set) var isQuitting = false
 
     private let intentStore: OnboardingRestartIntentStore
     private let preparationTimeoutNanoseconds: UInt64
@@ -288,103 +211,64 @@ final class OnboardingRestartCoordinator: ObservableObject {
         self.preparationTimeoutNanoseconds = preparationTimeoutNanoseconds
     }
 
-    func restart(
+    func quitAndResumeOnNextLaunch(
         mode: OnboardingPresentationMode,
+        step: OnboardingStep,
         settingsStore: SettingsStore,
-        prepareForRestart: @escaping @MainActor () async -> Bool,
+        prepareForQuit: @escaping @MainActor () async -> Bool,
         suspendOnboardingWindow: @escaping @MainActor () -> Void,
-        restoreOnboardingWindowAfterFailure: @escaping @MainActor () -> Void,
-        completion: @escaping (Result<Void, OnboardingRestartError>) -> Void
+        onFailure: @escaping @MainActor (OnboardingRestartError) -> Void
     ) {
-        guard OnboardingRestartRequestPolicy.permitsRestart(isRestarting: isRestarting) else { return }
+        guard OnboardingRestartRequestPolicy.permitsRestart(isQuitting: isQuitting) else { return }
         guard mode.restartRoute != nil else {
-            completion(.failure(.unsupportedMode))
+            onFailure(.unsupportedMode)
             return
         }
         guard Bundle.main.bundleURL.pathExtension == "app" else {
-            completion(.failure(.applicationBundleUnavailable))
+            onFailure(.applicationBundleUnavailable)
             return
         }
 
         let bundleIdentifier = Bundle.main.bundleIdentifier ?? ""
         guard !bundleIdentifier.isEmpty else {
-            completion(.failure(.applicationBundleUnavailable))
+            onFailure(.applicationBundleUnavailable)
             return
         }
 
-        isRestarting = true
+        isQuitting = true
         Task { @MainActor [weak self] in
             guard let self else { return }
-            guard await self.waitForPreparation(prepareForRestart) else {
-                self.isRestarting = false
-                completion(.failure(.interactiveChecksDidNotStop))
+            guard await self.waitForPreparation(prepareForQuit) else {
+                self.isQuitting = false
+                onFailure(.interactiveChecksDidNotStop)
                 return
             }
 
             settingsStore.flushPendingSave()
-            guard let intent = OnboardingRestartIntent(mode: mode, bundleIdentifier: bundleIdentifier) else {
-                self.isRestarting = false
-                completion(.failure(.unsupportedMode))
+            guard let intent = OnboardingRestartIntent(
+                mode: mode,
+                step: step,
+                bundleIdentifier: bundleIdentifier
+            ) else {
+                self.isQuitting = false
+                onFailure(.unsupportedMode)
                 return
             }
             do {
                 try self.intentStore.save(intent)
             } catch {
                 AppLog.shared.warn("[OnboardingRestartCoordinator] restart intent save failed: \(AppLog.safeDescription(error))")
-                self.isRestarting = false
-                completion(.failure(.launchFailed))
+                self.isQuitting = false
+                onFailure(.intentSaveFailed)
                 return
             }
 
-            // 停止確認後にだけ旧オンボーディングを隠す。後継の起動はhelperだけが行う。
             suspendOnboardingWindow()
-            guard self.launchHelper(intent: intent) else {
-                self.intentStore.recordHelperFailure(.helperUnavailable, for: intent)
-                self.isRestarting = false
-                restoreOnboardingWindowAfterFailure()
-                completion(.failure(.launchFailed))
-                return
+            // AppKitが`.terminateLater`でreplyを待っても、reply側のMainActor Taskが
+            // 起動できるよう、現在のMainActor jobが終わった後に終了を要求する。
+            DispatchQueue.main.async {
+                NSApp.terminate(nil)
             }
-            completion(.success(()))
-            // AppDelegateの単一終了state machineを必ず通す。
-            NSApp.terminate(nil)
-        }
-    }
-
-    private func launchHelper(intent: OnboardingRestartIntent) -> Bool {
-        guard let sourcePID = intent.sourceProcessIdentifier,
-              let generation = intent.generation,
-              let createdAt = intent.createdAt,
-              let expiresAt = intent.expiresAt,
-              OnboardingRestartHandoff.validatesHelperInvocation(
-                  intent: intent,
-                  bundleIdentifier: intent.bundleIdentifier,
-                  sourcePID: sourcePID,
-                  generation: generation,
-                  createdAt: createdAt,
-                  expiresAt: expiresAt
-              ) else {
-            return false
-        }
-        let helperURL = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/Helpers/KoedexRelaunchHelper", isDirectory: false)
-        guard FileManager.default.isExecutableFile(atPath: helperURL.path) else { return false }
-        let process = Process()
-        process.executableURL = helperURL
-        process.arguments = [
-            "--bundle-id", intent.bundleIdentifier,
-            "--source-pid", String(sourcePID),
-            "--generation", generation.uuidString,
-            "--created-at", String(createdAt.timeIntervalSince1970),
-            "--expires-at", String(expiresAt.timeIntervalSince1970),
-            "--intent-path", OnboardingRuntimeProfile.restartIntentURL.path,
-        ]
-        do {
-            try process.run()
-            return true
-        } catch {
-            AppLog.shared.warn("[OnboardingRestartCoordinator] helper launch failed: \(AppLog.safeDescription(error))")
-            return false
         }
     }
 
@@ -401,7 +285,7 @@ final class OnboardingRestartCoordinator: ObservableObject {
                     try await Task.sleep(nanoseconds: preparationTimeoutNanoseconds)
                     gate.resolve(false, continuation: continuation)
                 } catch {
-                    // 再起動要求自体の完了を優先する。preparation側が先にresolveしている。
+                    // 終了要求自体の完了を優先する。preparation側が先にresolveしている。
                 }
             }
         }

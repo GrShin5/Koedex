@@ -386,6 +386,51 @@ macOS の[Gatekeeper](#gatekeeper)が初回起動をブロックすることが�
 
 この操作が必要なのは、ビルドごとに一度だけです。
 
+**既存インストールの更新**
+
+すでに Koedex を入れていて、新しいリリースへ更新したい場合の手順です。
+
+AI エージェントに任せる方法（(a)・(b)）で使う `scripts/install_app.sh` は、
+`/Applications/Koedex.app` が既に存在するとエラーで停止し、**上書きしません。**
+そのため更新は、次の順番で行います。
+
+1. 今インストールされている `Koedex.app` を、削除せずに `/Applications` の外へ
+   移動します（例：デスクトップへドラッグ）。
+2. **新しいフォルダへ**、新しいリリースタグをあらためて clone します。既存の clone
+   フォルダをそのまま更新して使い回さないでください（手順は (a)・(b)・(c) いずれも
+   [17. 付録A](#17-付録aaiエージェントに導入を任せる)または
+   [18. 付録B](#18-付録b自分でソースからビルドする)と同じです）。
+3. ビルドします。手順1で退避した古いアプリを残してある場合、
+   `./scripts/make_app.sh release --previous-app <退避先のパス>` のように
+   `--previous-app` を付けると、ビルドが新旧の署名の連続性を検証し、
+   `更新互換性OK: bundle ID、Designated Requirement、署名者証明書は連続しています。`
+   と表示します。
+4. `/Applications` が手順1で空いているので、`scripts/install_app.sh` を使うか
+   （または手動で `dist/Koedex.app` を `/Applications` へドラッグして）新しいアプリを
+   配置します。
+
+**権限はそのまま引き継がれます。あらためて許可し直す必要はありません。** このリポジトリから
+ビルドする限り、bundle ID と署名 identity は変わらず、`scripts/make_app.sh` 自身が
+その連続性を検証します（手順3参照）。macOS はマイク・音声認識・アクセシビリティの許可を、
+個々の `.app` ファイルではなくこの identity に紐付けているため、新しいビルドは古いアプリへ
+許可した内容をそのまま引き継ぎます。
+
+**ただし、すでに壊れている権限は、更新しても直りません。** 画面の権限表示が「許可済み」に
+なっているのに録音や貼り付けが動かず、しかもシステム設定 →「プライバシーとセキュリティ」→
+マイク／音声認識／アクセシビリティのどの一覧にも Koedex が表示されない場合、それはこの Mac に
+以前あったインストールが残した古い macOS 権限（TCC）の記録です。アプリを更新しても、この記録は
+変わりません。実際に不具合のあった Mac で、この対処により解消することを確認しています。
+対処するには、Koedex を終了してから、次の3つを **`sudo` を付けずに** 実行してください。
+
+```bash
+tccutil reset Microphone com.koedex.app
+tccutil reset SpeechRecognition com.koedex.app
+tccutil reset Accessibility com.koedex.app
+```
+
+そのあと Koedex を開き直し、[ステップ3：3つの権限](#ステップ33つの権限)のとおり、
+通常どおり許可し直してください。
+
 ---
 
 ## 6. 初回セットアップ
@@ -455,8 +500,29 @@ Koedex が要求する[権限](#権限)は次の3つだけです。通知や入�
 | 何を押すと何が起きるか | 各権限のボタンを押すと、macOS の許可ダイアログが出ます。「許可」を選ぶと緑のチェックが付きます |
 | 拒否したらどうなるか | 赤い × が表示され、システム設定の該当画面へのリンクが出ます |
 | やり直せるか | アクセシビリティだけは、拒否したあとにもう一度ダイアログを出せます。マイクと音声認識はシステム設定から手動で有効にします |
-| 許可したのに反映されないとき | 画面にある「アプリの再起動」ボタンを押してください |
+| 許可したのに反映されないとき | Koedex を完全に終了し、もう一度開いてください。手順は次の「以前の Koedex を使っていた場合」を参照してください |
 | 後から変えられるか | システム設定 →「プライバシーとセキュリティ」でいつでも変更できます。ただし取り消すと Koedex は動作しなくなります |
+
+**「以前の Koedex を使っていた場合」（常時表示される折りたたみセクション）**
+
+このステップには、権限一覧の下に「> 以前の Koedex を使っていた場合」という見出しの
+折りたたみセクションが常に表示されています（既定では閉じています）。展開すると、次の1文が
+書かれています。
+
+> 上記で許可した権限が画面に反映されない場合は、Koedex を終了し、もう一度開いてください。
+
+その下にある **「Koedex を終了して、もう一度開く」** ボタンを押すと、Koedex はその場で終了します。
+**自動では再起動しません。** ご自身でもう一度 Koedex を開いてください。セットアップは、終了した
+時点のステップから再開します。
+
+以前このMacにKoedexを入れたことがある場合、画面の権限表示が「許可済み」になっているのに実際には
+録音や貼り付けが動かないことがあります。これは、古いmacOS権限（TCC）の記録が残っているためで、
+このセクションはその状態への対処を案内しています。詳しい原因と回復コマンドは
+[5. アプリを入手する](#5-アプリを入手する)の「既存インストールの更新」を参照してください。
+
+![ステップ3 以前のKoedexを使っていた場合](images/ja/onboarding-03-previous-install.png)
+
+この折りたたみセクションと「Koedexを終了して、もう一度開く」ボタンの拡大です。
 
 ### ステップ4：マイクと起動キー
 
@@ -2080,7 +2146,7 @@ KoedexというmacOSアプリを、公式GitHubリポジトリから取得して
 
 【固定する取得元】
 - 公式URL: https://github.com/GrShin5/Koedex.git
-- リリースタグ: v0.1.6
+- リリースタグ: v0.1.7
 - 検証方式: GitHub immutable release
 
 【作業場所】
@@ -2101,15 +2167,15 @@ KoedexというmacOSアプリを、公式GitHubリポジトリから取得して
   独断で切り替えないでください。
 
 【取得と照合】
-1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.6をcloneしてください。
-   git clone --branch v0.1.6 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
+1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.7をcloneしてください。
+   git clone --branch v0.1.7 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
 2. clone直後、スクリプトを1つも実行する前に、次をすべて確認してください。
    - originのfetch URLが https://github.com/GrShin5/Koedex.git と一致する
      （比較時だけ末尾の.gitの有無を同一視して構いません）
-   - ローカルのv0.1.6 tagが指すcommitとHEADが完全一致する
-   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.6もHEADと完全一致する
-   - GitHub公式APIのreleases/tags/v0.1.6が、tag_name=v0.1.6かつimmutable=trueを返す
-   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.6 --repo GrShin5/Koedexも成功する
+   - ローカルのv0.1.7 tagが指すcommitとHEADが完全一致する
+   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.7もHEADと完全一致する
+   - GitHub公式APIのreleases/tags/v0.1.7が、tag_name=v0.1.7かつimmutable=trueを返す
+   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.7 --repo GrShin5/Koedexも成功する
    - checkoutがcleanで、未追跡ファイルもない
 3. 1つでも一致しない、releaseが存在しない・immutableでない、取得結果を確認できない、
    別refへ誘導された場合は、
@@ -2195,11 +2261,11 @@ swift --version
 ### 手順1：リポジトリを clone する
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_JA -->
-公式リポジトリから、リリース `v0.1.6` の一点だけを clone します。最新の状態（`main`）ではなく、
+公式リポジトリから、リリース `v0.1.7` の一点だけを clone します。最新の状態（`main`）ではなく、
 この版だけを取得してください。`Koedex` という名前のフォルダが既にある場所では実行しないでください。
 
 ```bash
-git clone --branch v0.1.6 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.1.7 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -2209,7 +2275,7 @@ clone してできたフォルダの中で、以下をそのまま貼り付け�
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.1.6"
+EXPECTED_TAG="v0.1.7"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -2235,11 +2301,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 ❌ が1つでも出たら、そこで中止してください。別のURL、別のタグ、ZIPダウンロード、ミラーなど、
 別の取得方法へ切り替えないでください。
 
-タグはあとから移動されうるため、GitHub の Releases 画面で `v0.1.6` が immutable release として
+タグはあとから移動されうるため、GitHub の Releases 画面で `v0.1.7` が immutable release として
 公開されていることも確認してください。GitHub CLI を使える場合は、次のコマンドでも確認できます。
 
 ```bash
-gh release verify v0.1.6 --repo GrShin5/Koedex
+gh release verify v0.1.7 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_JA -->
 
@@ -2319,8 +2385,8 @@ swift build
 
 | 項目 | 内容 |
 | --- | --- |
-| 対象リリース | v0.1.6 |
-| 対象アプリバージョン | 0.1.6 |
+| 対象リリース | v0.1.7 |
+| 対象アプリバージョン | 0.1.7 |
 | 説明書の言語 | 日本語 |
 
 この説明書は、上記のリリース時点のソースコードをもとに書かれています。

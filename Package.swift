@@ -18,13 +18,6 @@ let package = Package(
             swiftSettings: [
                 .swiftLanguageMode(.v5)
             ]
-        ),
-        .executableTarget(
-            name: "KoedexRelaunchHelper",
-            path: "Sources/KoedexRelaunchHelper",
-            swiftSettings: [
-                .swiftLanguageMode(.v5)
-            ]
         )
     ]
 )

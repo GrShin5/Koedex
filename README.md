@@ -134,12 +134,12 @@ extended attributes in place, so it does not fix the problem.**
 #### Get the source
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_EN -->
-Clone only the single point tagged `v0.1.6` from the official repository. Do not take the latest
+Clone only the single point tagged `v0.1.7` from the official repository. Do not take the latest
 state (`main`) — take this release and nothing else. Do not run this where a folder named `Koedex`
 already exists.
 
 ```bash
-git clone --branch v0.1.6 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.1.7 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -149,7 +149,7 @@ Inside the folder the clone created, paste and run the following as-is.
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.1.6"
+EXPECTED_TAG="v0.1.7"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -175,11 +175,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 If even one ❌ appears, stop there. Do not switch to a different URL, a different tag, a ZIP
 download, a mirror, or any other way of obtaining the source.
 
-A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.6` is published as
+A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.7` is published as
 an immutable release. If you have the GitHub CLI, you can confirm the same thing with:
 
 ```bash
-gh release verify v0.1.6 --repo GrShin5/Koedex
+gh release verify v0.1.7 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_EN -->
 
@@ -321,6 +321,50 @@ Accessibility is checked once, at process start. After granting it,
 **fully quit and relaunch Koedex** rather than continuing in the same
 session — it will not pick up a newly granted Accessibility permission
 until it restarts.
+
+## Updating an existing installation
+
+`scripts/install_app.sh` refuses to overwrite an existing
+`/Applications/Koedex.app` — it fails with an error rather than replacing
+anything there. So updating to a new release means: move the old app aside
+first, then install the new one into the now-empty spot.
+
+1. Move the currently installed app out of the way instead of deleting it:
+   `mv /Applications/Koedex.app ~/Desktop/Koedex-old.app` (any destination
+   outside `/Applications` works).
+2. Clone the new release tag into a **fresh** folder, exactly as described in
+   [Get the source](#get-the-source) above — don't reuse or update the old
+   clone in place.
+3. Build it: `./scripts/make_app.sh release`. If you kept the app you moved
+   aside, you can add `--previous-app ~/Desktop/Koedex-old.app` so the build
+   verifies signing continuity against it and prints
+   `更新互換性OK: bundle ID、Designated Requirement、署名者証明書は連続しています。`
+4. Install it: `bash scripts/install_app.sh`. This only works now because step
+   1 cleared `/Applications/Koedex.app`.
+
+**Your permissions carry over — you do not need to grant them again.** The
+bundle identifier and the signing identity stay the same across a build made
+from this repository, and `scripts/make_app.sh` checks that continuity itself
+(see step 3). macOS ties Microphone, Speech Recognition, and Accessibility
+grants to that identity, not to the specific `.app` file, so the new build
+inherits what you already granted the old one.
+
+**But updating does not fix a permission that is already broken.** If Koedex
+shows a permission as already granted yet recording or pasting still doesn't
+work, and Koedex doesn't appear at all in System Settings → Privacy &
+Security → Microphone/Speech Recognition/Accessibility, that's a leftover
+macOS permission record (TCC) from an earlier install on this Mac — updating
+the app doesn't touch it. This was confirmed on a real affected Mac. To clear
+it: quit Koedex, then run these three commands **without `sudo`**:
+
+```bash
+tccutil reset Microphone com.koedex.app
+tccutil reset SpeechRecognition com.koedex.app
+tccutil reset Accessibility com.koedex.app
+```
+
+Then reopen Koedex and grant the three permissions normally, as in
+[Granting the three permissions](#granting-the-three-permissions) above.
 
 ## Usage
 
