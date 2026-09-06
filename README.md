@@ -59,8 +59,12 @@ communication channel. See [NOTICE](NOTICE) for the full notice.
   does not modify your `~/.codex/config.toml`.
 - Everything else — settings, history, your personal dictionary, custom
   instructions — is stored locally under
-  `~/Library/Application Support/Koedex/` and is never transmitted
-  anywhere by Koedex itself.
+  `~/Library/Application Support/Koedex/`. Settings and history are never
+  transmitted anywhere by Koedex itself. **Your personal dictionary and
+  custom instructions are sent when they are used:** enabled dictionary
+  entries and your saved instructions are included in the prompt passed to
+  `codex` for AI cleanup and "AI command", so they leave your Mac by the
+  same route as the transcribed text.
 - **That folder is created with owner-only permissions.** Directories are
   `0700` and files Koedex itself writes are `0600`, so on a Mac shared
   between several accounts, nobody else can read your transcripts. The
@@ -134,12 +138,12 @@ extended attributes in place, so it does not fix the problem.**
 #### Get the source
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_EN -->
-Clone only the single point tagged `v0.1.8` from the official repository. Do not take the latest
+Clone only the single point tagged `v0.1.9` from the official repository. Do not take the latest
 state (`main`) — take this release and nothing else. Do not run this where a folder named `Koedex`
 already exists.
 
 ```bash
-git clone --branch v0.1.8 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -149,7 +153,7 @@ Inside the folder the clone created, paste and run the following as-is.
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.1.8"
+EXPECTED_TAG="v0.1.9"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -175,11 +179,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 If even one ❌ appears, stop there. Do not switch to a different URL, a different tag, a ZIP
 download, a mirror, or any other way of obtaining the source.
 
-A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.8` is published as
+A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.9` is published as
 an immutable release. If you have the GitHub CLI, you can confirm the same thing with:
 
 ```bash
-gh release verify v0.1.8 --repo GrShin5/Koedex
+gh release verify v0.1.9 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_EN -->
 

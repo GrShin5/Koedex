@@ -26,6 +26,162 @@ enum SelectionCaptureResult {
     case none
     case unavailable(SelectionCaptureFailure)
     case tooLong(actual: Int, maximum: Int)
+    case cancelledTemporaryCopy(ClipboardCancellationReceipt)
+}
+
+@MainActor
+final class ClipboardCancellationReceipt {
+    enum Resolution: Equatable {
+        case restored
+        case preserved
+        case clipboardChanged
+        case expired
+        case revoked
+        case alreadyResolved
+        case restoreFailed
+    }
+
+    nonisolated static let lifetimeSeconds: TimeInterval = 10
+    private let expectedChangeCount: Int
+    private var currentChangeCount: (() -> Int)?
+    private var restoreSnapshot: ((Int) -> Bool)?
+    private let now: () -> Date
+    private let expiresAt: Date
+    private var isValid = true
+    private var didResolve = false
+
+    init(
+        expectedChangeCount: Int,
+        lifetimeSeconds: TimeInterval = ClipboardCancellationReceipt.lifetimeSeconds,
+        currentChangeCount: @escaping () -> Int,
+        restoreSnapshot: @escaping (Int) -> Bool,
+        now: @escaping () -> Date = Date.init
+    ) {
+        self.expectedChangeCount = expectedChangeCount
+        self.currentChangeCount = currentChangeCount
+        self.restoreSnapshot = restoreSnapshot
+        self.now = now
+        self.expiresAt = now().addingTimeInterval(min(Self.lifetimeSeconds, max(0, lifetimeSeconds)))
+    }
+
+    func resolve(restoreOriginal: Bool) -> Resolution {
+        guard !didResolve else { return .alreadyResolved }
+        didResolve = true
+        guard isValid, let currentChangeCount, let restoreSnapshot else {
+            releaseSnapshot()
+            return .revoked
+        }
+        isValid = false
+        guard now() < expiresAt else {
+            releaseSnapshot()
+            return .expired
+        }
+        guard restoreOriginal else {
+            releaseSnapshot()
+            return .preserved
+        }
+        guard currentChangeCount() == expectedChangeCount else {
+            releaseSnapshot()
+            return .clipboardChanged
+        }
+        let restored = restoreSnapshot(expectedChangeCount)
+        releaseSnapshot()
+        return restored ? .restored : .restoreFailed
+    }
+
+    func invalidate() {
+        isValid = false
+        releaseSnapshot()
+    }
+
+    func isUsable() -> Bool {
+        guard isValid,
+              !didResolve,
+              now() < expiresAt,
+              currentChangeCount?() == expectedChangeCount else {
+            invalidate()
+            return false
+        }
+        return true
+    }
+
+    private func releaseSnapshot() {
+        currentChangeCount = nil
+        restoreSnapshot = nil
+    }
+}
+
+/// Owns one selection-capture completion across cancellation and replacement.
+/// A recovery receipt is accepted only for the capture explicitly cancelled by
+/// the user's Esc action; all other late completions are inert.
+@MainActor
+final class AICommandCaptureCompletionGate {
+    struct Lease: Equatable {
+        let id: UUID
+        let generation: UInt64
+    }
+
+    enum Completion {
+        case current
+        case recovery(ClipboardCancellationReceipt)
+        case stale
+    }
+
+    private var generation: UInt64 = 0
+    private(set) var activeCaptureID: UUID?
+    private var recoveryAuthorizedCaptureID: UUID?
+
+    func begin(id: UUID = UUID()) -> Lease {
+        generation &+= 1
+        activeCaptureID = id
+        recoveryAuthorizedCaptureID = nil
+        return Lease(id: id, generation: generation)
+    }
+
+    func authorizeUserCancellation() {
+        recoveryAuthorizedCaptureID = activeCaptureID
+        activeCaptureID = nil
+    }
+
+    func revokeAll() {
+        activeCaptureID = nil
+        recoveryAuthorizedCaptureID = nil
+    }
+
+    func revokeActive(id: UUID) {
+        guard activeCaptureID == id else { return }
+        activeCaptureID = nil
+        recoveryAuthorizedCaptureID = nil
+    }
+
+    func finishIfCurrent(_ lease: Lease) {
+        guard owns(lease) else { return }
+        activeCaptureID = nil
+    }
+
+    func classify(
+        _ result: SelectionCaptureResult,
+        lease: Lease,
+        appIsIdle: Bool
+    ) -> Completion {
+        if case .cancelledTemporaryCopy(let receipt) = result {
+            guard lease.generation == generation,
+                  recoveryAuthorizedCaptureID == lease.id,
+                  activeCaptureID == nil,
+                  appIsIdle else {
+                receipt.invalidate()
+                return .stale
+            }
+            recoveryAuthorizedCaptureID = nil
+            return .recovery(receipt)
+        }
+        guard owns(lease) else { return .stale }
+        return .current
+    }
+
+    private func owns(_ lease: Lease) -> Bool {
+        lease.generation == generation && activeCaptureID == lease.id
+    }
 }
 
 /// Captures the selection at recording start. AX is authoritative; Cmd-C is a
@@ -36,6 +192,20 @@ final class SelectedTextCapture {
     static let maximumCharacters = 12_000
     private let copyPollNanoseconds: UInt64 = 25_000_000
     private let copyPollAttempts = 13
+
+    struct TemporaryCopyTestRuntime {
+        let snapshotIsComplete: Bool
+        let snapshotStillCurrent: () -> Bool
+        let changeCount: () -> Int
+        let copiedString: () -> String?
+        let postCopy: () -> Bool
+        let secureInputEnabled: () -> Bool
+        let targetMatches: () -> Bool
+        let restoreSnapshot: (Int) -> Bool
+        var sleep: (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }
+        var receiptLifetimeSeconds: TimeInterval = ClipboardCancellationReceipt.lifetimeSeconds
+        var now: () -> Date = Date.init
+    }
 
     @MainActor
     private enum CaptureTarget {
@@ -171,19 +341,40 @@ final class SelectedTextCapture {
         }
         let pasteboard = NSPasteboard.general
         let snapshot = PasteboardSnapshot(pasteboard)
-        guard snapshot.isComplete else {
+        let runtime = TemporaryCopyTestRuntime(
+            snapshotIsComplete: snapshot.isComplete,
+            snapshotStillCurrent: { snapshot.stillRepresentsCurrentContents(of: pasteboard) },
+            changeCount: { pasteboard.changeCount },
+            copiedString: { pasteboard.string(forType: .string) },
+            postCopy: postCommandC,
+            secureInputEnabled: IsSecureEventInputEnabled,
+            targetMatches: target.matchesCurrentTarget,
+            restoreSnapshot: { snapshot.restore(to: pasteboard, ifChangeCountIs: $0) }
+        )
+        return await captureByTemporaryCopy(runtime: runtime)
+    }
+
+    func debugCaptureTemporaryCopy(runtime: TemporaryCopyTestRuntime) async -> SelectionCaptureResult {
+        await captureByTemporaryCopy(runtime: runtime)
+    }
+
+    private func captureByTemporaryCopy(runtime: TemporaryCopyTestRuntime) async -> SelectionCaptureResult {
+        guard runtime.targetMatches() else {
+            return .unavailable(.focusedElementUnavailable)
+        }
+        guard runtime.snapshotIsComplete else {
             return .unavailable(.clipboardRestoreFailed)
         }
-        guard snapshot.stillRepresentsCurrentContents(of: pasteboard) else {
+        guard runtime.snapshotStillCurrent() else {
             return .unavailable(.clipboardChanged)
         }
-        let before = pasteboard.changeCount
-        guard postCommandC() else { return .unavailable(.selectionUnsupported) }
+        let before = runtime.changeCount()
+        guard runtime.postCopy() else { return .unavailable(.selectionUnsupported) }
 
         var copiedChangeCount: Int?
         var copiedText: String?
         for attempt in 0..<copyPollAttempts {
-            let currentChangeCount = pasteboard.changeCount
+            let currentChangeCount = runtime.changeCount()
             if currentChangeCount != before {
                 if let copiedChangeCount, copiedChangeCount != currentChangeCount {
                     // A second write may be a user copy. Its author cannot be
@@ -194,39 +385,36 @@ final class SelectedTextCapture {
             }
 
             if Task.isCancelled {
-                return finishTemporaryCopyFailure(
-                    .selectionUnsupported,
-                    snapshot: snapshot,
-                    pasteboard: pasteboard,
+                return await cancelledTemporaryCopyResult(
+                    runtime: runtime,
+                    beforeChangeCount: before,
                     copiedChangeCount: copiedChangeCount,
-                    restoreAllowed: false
+                    remainingPolls: copyPollAttempts - attempt - 1
                 )
             }
-            if IsSecureEventInputEnabled() {
+            if runtime.secureInputEnabled() {
                 return finishTemporaryCopyFailure(
                     .secureInput,
-                    snapshot: snapshot,
-                    pasteboard: pasteboard,
+                    runtime: runtime,
                     copiedChangeCount: copiedChangeCount,
                     restoreAllowed: false
                 )
             }
-            guard target.matchesCurrentTarget() else {
+            guard runtime.targetMatches() else {
                 return finishTemporaryCopyFailure(
                     .focusedElementUnavailable,
-                    snapshot: snapshot,
-                    pasteboard: pasteboard,
+                    runtime: runtime,
                     copiedChangeCount: copiedChangeCount,
                     restoreAllowed: false
                 )
             }
 
             if copiedChangeCount != nil {
-                copiedText = pasteboard.string(forType: .string)
+                copiedText = runtime.copiedString()
                 if copiedText != nil { break }
             }
             guard attempt + 1 < copyPollAttempts else { break }
-            try? await Task.sleep(nanoseconds: copyPollNanoseconds)
+            await runtime.sleep(copyPollNanoseconds)
         }
 
         guard let copiedChangeCount else {
@@ -237,45 +425,41 @@ final class SelectedTextCapture {
         guard let copiedText else {
             return finishTemporaryCopyFailure(
                 .copyDidNotProduceText,
-                snapshot: snapshot,
-                pasteboard: pasteboard,
+                runtime: runtime,
                 copiedChangeCount: copiedChangeCount,
                 restoreAllowed: true
             )
         }
 
         if Task.isCancelled {
-            return finishTemporaryCopyFailure(
-                .selectionUnsupported,
-                snapshot: snapshot,
-                pasteboard: pasteboard,
+            return await cancelledTemporaryCopyResult(
+                runtime: runtime,
+                beforeChangeCount: before,
                 copiedChangeCount: copiedChangeCount,
-                restoreAllowed: false
+                remainingPolls: 0
             )
         }
-        if IsSecureEventInputEnabled() {
+        if runtime.secureInputEnabled() {
             return finishTemporaryCopyFailure(
                 .secureInput,
-                snapshot: snapshot,
-                pasteboard: pasteboard,
+                runtime: runtime,
                 copiedChangeCount: copiedChangeCount,
                 restoreAllowed: false
             )
         }
-        guard target.matchesCurrentTarget() else {
+        guard runtime.targetMatches() else {
             return finishTemporaryCopyFailure(
                 .focusedElementUnavailable,
-                snapshot: snapshot,
-                pasteboard: pasteboard,
+                runtime: runtime,
                 copiedChangeCount: copiedChangeCount,
                 restoreAllowed: false
             )
         }
-        guard pasteboard.changeCount == copiedChangeCount else {
+        guard runtime.changeCount() == copiedChangeCount else {
             return .unavailable(.clipboardChanged)
         }
-        guard snapshot.restore(to: pasteboard, ifChangeCountIs: copiedChangeCount) else {
-            if pasteboard.changeCount != copiedChangeCount {
+        guard runtime.restoreSnapshot(copiedChangeCount) else {
+            if runtime.changeCount() != copiedChangeCount {
                 return .unavailable(.clipboardChanged)
             }
             return .unavailable(.clipboardRestoreFailed)
@@ -285,21 +469,52 @@ final class SelectedTextCapture {
 
     private func finishTemporaryCopyFailure(
         _ failure: SelectionCaptureFailure,
-        snapshot: PasteboardSnapshot,
-        pasteboard: NSPasteboard,
+        runtime: TemporaryCopyTestRuntime,
         copiedChangeCount: Int?,
         restoreAllowed: Bool
     ) -> SelectionCaptureResult {
         guard restoreAllowed, let copiedChangeCount else {
             return .unavailable(failure)
         }
-        guard pasteboard.changeCount == copiedChangeCount else {
+        guard runtime.changeCount() == copiedChangeCount else {
             return .unavailable(.clipboardChanged)
         }
-        guard snapshot.restore(to: pasteboard, ifChangeCountIs: copiedChangeCount) else {
+        guard runtime.restoreSnapshot(copiedChangeCount) else {
             return .unavailable(.clipboardRestoreFailed)
         }
         return .unavailable(failure)
+    }
+
+    private func cancelledTemporaryCopyResult(
+        runtime: TemporaryCopyTestRuntime,
+        beforeChangeCount: Int,
+        copiedChangeCount initialCopiedChangeCount: Int?,
+        remainingPolls: Int
+    ) async -> SelectionCaptureResult {
+        var copiedChangeCount = initialCopiedChangeCount
+        if let copiedChangeCount, copiedChangeCount != beforeChangeCount + 1 {
+            return .unavailable(.clipboardChanged)
+        }
+        for _ in 0..<max(0, remainingPolls) {
+            await Task.detached { await runtime.sleep(self.copyPollNanoseconds) }.value
+            let current = runtime.changeCount()
+            if current == beforeChangeCount { continue }
+            guard current == beforeChangeCount + 1 else {
+                return .unavailable(.clipboardChanged)
+            }
+            if let copiedChangeCount, copiedChangeCount != current {
+                return .unavailable(.clipboardChanged)
+            }
+            copiedChangeCount = current
+        }
+        guard let copiedChangeCount else { return .unavailable(.selectionUnsupported) }
+        return .cancelledTemporaryCopy(ClipboardCancellationReceipt(
+            expectedChangeCount: copiedChangeCount,
+            lifetimeSeconds: runtime.receiptLifetimeSeconds,
+            currentChangeCount: runtime.changeCount,
+            restoreSnapshot: runtime.restoreSnapshot,
+            now: runtime.now
+        ))
     }
 
     private func selectedTextRange(of element: AXUIElement) -> CFRange? {

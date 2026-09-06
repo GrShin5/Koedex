@@ -195,35 +195,66 @@ enum TranscriptionError: Error, LocalizedError {
 /// `warmUp()` を呼びモデルアセットを事前準備しておく。
 @MainActor
 final class TranscriptionEngine: ObservableObject {
+    enum LifecycleTestPoint: Equatable {
+        case startAfterPriorStop
+        case startAfterFormat
+        case startAfterAnalyzerLaunch
+        case reconfigureAfterLocale
+        case reconfigureAfterAssets
+        case reconfigureAfterRuntime
+        case fakeResultsStream
+    }
+
+    struct LifecycleTestSeam {
+        let suspend: @MainActor (LifecycleTestPoint, UUID) async throws -> Void
+        let bypassSpeechFramework: Bool
+        var finishTimeoutSeconds: TimeInterval = 5
+        var didConsumeBuffer: (@Sendable (UUID) -> Void)?
+    }
+
     @Published private(set) var isWarmedUp = false
     @Published private(set) var isWarmingUp = false
     @Published private(set) var partialText = ""
 
     private var locale: Locale
-    private var activeTranscriber: SpeechTranscriber?
-    private var analyzer: SpeechAnalyzer?
-    private var resultsTask: Task<Void, Never>?
-    private var analyzerStartTask: Task<Void, Never>?
+    /// 1録音の可変状態を1つの所有物へ閉じ込める。古い停止処理がawaitから戻っても、
+    /// 次の録音が公開したruntimeへ触れないための境界。
+    private final class StreamingRuntime {
+        let streamID: UUID
+        let diagnostics: TranscriptionStreamDiagnostics
+        let partialResultHandler: ((UUID, String, Bool) -> Void)?
+        var transcriber: SpeechTranscriber?
+        var analyzer: SpeechAnalyzer?
+        var resultsTask: Task<Void, Never>?
+        var analyzerStartTask: Task<Void, Never>?
+        var bufferQueue: AsyncStream<AVAudioPCMBuffer>.Continuation?
+        var bufferConsumerTask: Task<Void, Never>?
+        var inputBuilder: AsyncStream<AnalyzerInput>.Continuation?
+        var finalizedSegments: [String] = []
+        var partialText = ""
+        var acceptsResults = true
+        var didTimeOutDuringFinish = false
+        var stopTask: Task<String, Never>?
 
-    /// tapコールバック(nonisolated寄りのコンテキストから呼ばれ得る)から直接inputBuilderへappendせず、
-    /// 一旦このバッファキューへyieldし、単一の消費Taskが順番にinputBuilderへappendする。
-    /// per-buffer Taskの実行順不定によるバッファ順序崩れを排除するための直列パイプライン。
-    private var bufferQueue: AsyncStream<AVAudioPCMBuffer>.Continuation?
-    private var bufferConsumerTask: Task<Void, Never>?
-    private var inputBuilder: AsyncStream<AnalyzerInput>.Continuation?
-    private var streamDiagnostics: TranscriptionStreamDiagnostics?
+        init(
+            streamID: UUID,
+            diagnostics: TranscriptionStreamDiagnostics,
+            partialResultHandler: ((UUID, String, Bool) -> Void)?,
+            transcriber: SpeechTranscriber?,
+            analyzer: SpeechAnalyzer?
+        ) {
+            self.streamID = streamID
+            self.diagnostics = diagnostics
+            self.partialResultHandler = partialResultHandler
+            self.transcriber = transcriber
+            self.analyzer = analyzer
+        }
+    }
 
-    private var finalizedSegments: [String] = []
-    /// 結果callbackと録音sessionの対応を明示する。停止完了後に届いた古い結果を
-    /// 次の録音へ混入させないため、開始側が発行したIDだけを受理する。
-    private var activeStreamID: UUID?
-    /// 第3引数はSpeech側の確定結果かどうか。録音全体の終端ではないため、
-    /// ハンズフリー送信側はこれだけで350msの安定待ちを省略してはならない。
-    private var partialResultHandler: ((UUID, String, Bool) -> Void)?
-    /// `stopStreaming` は複数のcancel/start経路から同時に要求され得るため、
-    /// 1つのteardownを共有し、次のstartはその完了を待つ。
-    private var activeStopTask: Task<String, Never>?
-    private var activeStopTaskToken: UUID?
+    private var activeRuntime: StreamingRuntime?
+    private var activeStartLease: (id: UUID, streamID: UUID)?
+    private var activeReconfigurationLease: UUID?
+    private let lifecycleTestSeam: LifecycleTestSeam?
 
     /// asset準備後、実録音を開始せずに構築した初回用のSpeech runtime。
     /// `SpeechAnalyzer.start`やAVAudioEngineはここでは呼ばないため、マイク利用表示・
@@ -237,8 +268,9 @@ final class TranscriptionEngine: ObservableObject {
     }
     private var preparedRuntime: PreparedRuntime?
 
-    init(localeIdentifier: String = "ja-JP") {
+    init(localeIdentifier: String = "ja-JP", lifecycleTestSeam: LifecycleTestSeam? = nil) {
         self.locale = Locale(identifier: localeIdentifier)
+        self.lifecycleTestSeam = lifecycleTestSeam
     }
 
     /// `.fastResults` を外すと、日本語モデルは約11.5秒ぶんの音声が溜まるまで
@@ -269,11 +301,14 @@ final class TranscriptionEngine: ObservableObject {
         try Task.checkCancellation()
         try await installAssets(for: resolvedLocale)
         try Task.checkCancellation()
-        locale = resolvedLocale
-        preparedRuntime = nil
         let primeStartedAt = Date()
-        await prepareRuntime(for: resolvedLocale)
+        let candidateRuntime = await makePreparedRuntime(for: resolvedLocale)
         try Task.checkCancellation()
+        guard activeRuntime == nil, activeStartLease == nil else {
+            throw TranscriptionError.languageChangeWhileRecording
+        }
+        locale = resolvedLocale
+        preparedRuntime = candidateRuntime
         isWarmedUp = true
         AppLog.shared.info(String(
             format: "[Telemetry] stt_warmup_complete locale=%@ totalMs=%.0f runtimePrimeMs=%.0f prepared=%@",
@@ -288,26 +323,48 @@ final class TranscriptionEngine: ObservableObject {
     /// locale/assetの検証と取得が成功するまで既存のlocaleとwarm-up状態には触れないため、
     /// 失敗しても次の録音は従来どおりの言語で安全に開始できる。
     func reconfigure(to language: AppLanguage) async throws {
-        guard !isStreaming else {
+        guard !isStreaming, activeStartLease == nil else {
             throw TranscriptionError.languageChangeWhileRecording
+        }
+        let lease = UUID()
+        activeReconfigurationLease = lease
+        defer {
+            if activeReconfigurationLease == lease {
+                activeReconfigurationLease = nil
+            }
         }
         try Task.checkCancellation()
 
         let requestedLocale = Locale(identifier: language.preferredSpeechLocaleIdentifier)
-        let resolvedLocale = try await resolveSupportedLocale(for: requestedLocale)
-        try Task.checkCancellation()
+        let resolvedLocale: Locale
+        if lifecycleTestSeam?.bypassSpeechFramework == true {
+            resolvedLocale = requestedLocale
+        } else {
+            resolvedLocale = try await resolveSupportedLocale(for: requestedLocale)
+        }
+        try await checkReconfigurationLease(lease, point: .reconfigureAfterLocale)
         if locale.identifier(.bcp47).caseInsensitiveCompare(resolvedLocale.identifier(.bcp47)) == .orderedSame,
            isWarmedUp {
             return
         }
 
-        try await installAssets(for: resolvedLocale)
-        try Task.checkCancellation()
-        locale = resolvedLocale
-        preparedRuntime = nil
+        if lifecycleTestSeam?.bypassSpeechFramework != true {
+            try await installAssets(for: resolvedLocale)
+        }
+        try await checkReconfigurationLease(lease, point: .reconfigureAfterAssets)
         let primeStartedAt = Date()
-        await prepareRuntime(for: resolvedLocale)
-        try Task.checkCancellation()
+        let candidateRuntime: PreparedRuntime?
+        if lifecycleTestSeam?.bypassSpeechFramework == true {
+            candidateRuntime = nil
+        } else {
+            candidateRuntime = await makePreparedRuntime(for: resolvedLocale)
+        }
+        try await checkReconfigurationLease(lease, point: .reconfigureAfterRuntime)
+        guard !isStreaming, activeStartLease == nil else {
+            throw TranscriptionError.languageChangeWhileRecording
+        }
+        locale = resolvedLocale
+        preparedRuntime = candidateRuntime
         isWarmedUp = true
         AppLog.shared.info(String(
             format: "[Telemetry] stt_language_ready locale=%@ runtimePrimeMs=%.0f prepared=%@",
@@ -340,24 +397,34 @@ final class TranscriptionEngine: ObservableObject {
     }
 
     private var isStreaming: Bool {
-        activeTranscriber != nil || analyzer != nil || inputBuilder != nil || bufferQueue != nil
+        activeRuntime != nil
     }
 
-    private func prepareRuntime(for targetLocale: Locale) async {
-        guard !isStreaming else { return }
+    private func makePreparedRuntime(for targetLocale: Locale) async -> PreparedRuntime? {
+        guard !isStreaming else { return nil }
         let transcriber = makeTranscriber(locale: targetLocale)
         let targetFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
         let analyzer = SpeechAnalyzer(modules: [transcriber])
-        guard !isStreaming,
-              locale.identifier(.bcp47).caseInsensitiveCompare(targetLocale.identifier(.bcp47)) == .orderedSame else {
-            return
-        }
-        preparedRuntime = PreparedRuntime(
+        guard !isStreaming else { return nil }
+        return PreparedRuntime(
             localeIdentifier: targetLocale.identifier(.bcp47),
             transcriber: transcriber,
             analyzer: analyzer,
             targetFormat: targetFormat
         )
+    }
+
+    private func checkReconfigurationLease(
+        _ lease: UUID,
+        point: LifecycleTestPoint
+    ) async throws {
+        if let lifecycleTestSeam {
+            try await lifecycleTestSeam.suspend(point, lease)
+        }
+        try Task.checkCancellation()
+        guard activeReconfigurationLease == lease, !isStreaming, activeStartLease == nil else {
+            throw CancellationError()
+        }
     }
 
     private func takePreparedRuntime() -> PreparedRuntime? {
@@ -440,40 +507,69 @@ final class TranscriptionEngine: ObservableObject {
         streamID: UUID = UUID(),
         onPartialText: ((UUID, String, Bool) -> Void)? = nil
     ) async throws -> AVAudioFormat? {
+        guard activeReconfigurationLease == nil else {
+            throw TranscriptionError.languageChangeWhileRecording
+        }
+        let lease = UUID()
+        activeStartLease = (lease, streamID)
+        defer {
+            if activeStartLease?.id == lease {
+                activeStartLease = nil
+            }
+        }
+
         // Esc直後の再開始などで、前sessionのfinalizeがまだ終わっている場合は
         // 先に確実に回収する。旧taskが新しいinputBuilderを閉じる競合を防ぐ。
-        if let activeStopTask {
-            _ = await activeStopTask.value
-            // 元の停止呼び出し元がcancelされていても、完了済みtaskを次の
-            // stop要求へ誤って再利用しないよう、開始側でも回収する。
-            self.activeStopTask = nil
-            self.activeStopTaskToken = nil
+        if let currentRuntime = activeRuntime {
+            _ = await stopStreaming(streamID: currentRuntime.streamID)
         }
-        if isStreaming {
-            _ = await stopStreaming()
-        }
+        try await checkStartLease(lease, streamID: streamID, point: .startAfterPriorStop)
         guard isWarmedUp else { throw TranscriptionError.notWarmedUp }
         let streamPreparationStartedAt = Date()
-        finalizedSegments = []
-        partialText = ""
-        didTimeOutDuringFinishStreaming = false
         let diagnostics = TranscriptionStreamDiagnostics(correlationID: streamID.uuidString)
-        streamDiagnostics = diagnostics
-        activeStreamID = streamID
-        partialResultHandler = onPartialText
+
+        if lifecycleTestSeam?.bypassSpeechFramework == true {
+            try await checkStartLease(lease, streamID: streamID, point: .startAfterFormat)
+            let runtime = StreamingRuntime(
+                streamID: streamID,
+                diagnostics: diagnostics,
+                partialResultHandler: onPartialText,
+                transcriber: nil,
+                analyzer: nil
+            )
+            installBufferPipeline(on: runtime, inputContinuation: nil)
+            if let lifecycleTestSeam {
+                runtime.resultsTask = Task { [weak self, weak runtime] in
+                    try? await lifecycleTestSeam.suspend(.fakeResultsStream, streamID)
+                    guard let self, let runtime else { return }
+                    self.acceptTextResult("late-fixture", isFinal: true, runtime: runtime)
+                }
+            }
+            try await checkStartLease(lease, streamID: streamID, point: .startAfterAnalyzerLaunch)
+            activeRuntime = runtime
+            partialText = ""
+            didTimeOutDuringFinishStreaming = false
+            return nil
+        }
 
         let prepared = takePreparedRuntime()
         let transcriber = prepared?.transcriber ?? makeTranscriber()
-        self.activeTranscriber = transcriber
         let targetFormat: AVAudioFormat?
         if let prepared {
             targetFormat = prepared.targetFormat
         } else {
             targetFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber])
         }
+        try await checkStartLease(lease, streamID: streamID, point: .startAfterFormat)
 
         let analyzer = prepared?.analyzer ?? SpeechAnalyzer(modules: [transcriber])
-        self.analyzer = analyzer
+        let runtime = StreamingRuntime(
+            streamID: streamID,
+            diagnostics: diagnostics,
+            partialResultHandler: onPartialText,
+            transcriber: transcriber,
+            analyzer: analyzer
+        )
         diagnostics.recordStreamSource(prepared == nil ? "cold" : "prepared")
         AppLog.shared.info(String(
             format: "[Telemetry] stt_stream_ready session=%@ source=%@ elapsedMs=%.0f",
@@ -483,12 +579,11 @@ final class TranscriptionEngine: ObservableObject {
         ))
 
         let (inputStream, inputContinuation) = AsyncStream<AnalyzerInput>.makeStream()
-        self.inputBuilder = inputContinuation
+        runtime.inputBuilder = inputContinuation
 
         // tapコールバック → AsyncStreamにyield → 単一の消費Taskが順番にinputBuilderへappend、
         // という直列パイプライン。Task実行順不定によるバッファ順序崩れを排除する。
-        let (bufferStream, bufferContinuation) = AsyncStream<AVAudioPCMBuffer>.makeStream()
-        self.bufferQueue = bufferContinuation
+        installBufferPipeline(on: runtime, inputContinuation: inputContinuation)
         // **`self` を捕捉しないこと。** このクラスは `@MainActor` なので、`self` に触れると
         // バッファ1つごとにMainActorへホップする。録音中はHUDの再描画やSwiftUIの
         // 再評価と同じMainActorを奪い合い、音声がキューに溜まって停止後にまとめて
@@ -497,21 +592,15 @@ final class TranscriptionEngine: ObservableObject {
         //
         // 束縛した continuation は、この録音が終われば finish 済みになり以後の yield は
         // 無視される。そのため stream ID を照合しなくても古い録音のバッファは混入しない。
-        bufferConsumerTask = Task.detached(priority: .userInitiated) {
-            for await buffer in bufferStream {
-                diagnostics.recordConsumerBuffer()
-                inputContinuation.yield(AnalyzerInput(buffer: buffer))
-            }
-        }
-
         // MainActor据え置きが正しい。`diagnostics`はローカル定数として
         // 捕捉し、次の録音でstreamDiagnosticsが差し替わってもこの録音の集計へ書き続ける。
-        resultsTask = Task { [weak self] in
+        runtime.resultsTask = Task { [weak self, weak runtime] in
+            guard let runtime else { return }
             guard let self else { return }
             diagnostics.recordResultsIterationStarted()
             do {
                 for try await result in transcriber.results {
-                    self.handleResult(result, streamID: streamID)
+                    self.handleResult(result, runtime: runtime)
                 }
                 diagnostics.recordResultsStreamFinished(error: nil)
             } catch {
@@ -528,7 +617,7 @@ final class TranscriptionEngine: ObservableObject {
         // ここで待つのはあくまでTask起動の完了を確実にするための同期であり、
         // startStreamingが返った時点でanalyzerStartTaskが必ず非nilであることを保証するため。
         let taskLaunchedSignal = AsyncStream<Void>.makeStream()
-        analyzerStartTask = Task {
+        runtime.analyzerStartTask = Task {
             taskLaunchedSignal.continuation.yield(())
             taskLaunchedSignal.continuation.finish()
             // `self`を捕捉しないこと（上の bufferConsumerTask と同じ理由）。`diagnostics` は
@@ -545,25 +634,81 @@ final class TranscriptionEngine: ObservableObject {
         for await _ in taskLaunchedSignal.stream {
             break
         }
+        do {
+            try await checkStartLease(lease, streamID: streamID, point: .startAfterAnalyzerLaunch)
+        } catch {
+            runtime.bufferQueue?.finish()
+            runtime.inputBuilder?.finish()
+            runtime.bufferConsumerTask?.cancel()
+            runtime.resultsTask?.cancel()
+            runtime.analyzerStartTask?.cancel()
+            throw error
+        }
+        activeRuntime = runtime
+        partialText = ""
+        didTimeOutDuringFinishStreaming = false
         return targetFormat
     }
 
-    private func handleResult(_ result: SpeechTranscriber.Result, streamID: UUID) {
-        guard Self.acceptsCallback(streamID: streamID, activeStreamID: activeStreamID) else {
+    private func checkStartLease(
+        _ lease: UUID,
+        streamID: UUID,
+        point: LifecycleTestPoint
+    ) async throws {
+        if let lifecycleTestSeam {
+            try await lifecycleTestSeam.suspend(point, streamID)
+        }
+        try Task.checkCancellation()
+        guard activeStartLease?.id == lease,
+              activeStartLease?.streamID == streamID,
+              activeReconfigurationLease == nil else {
+            throw CancellationError()
+        }
+    }
+
+    func cancelPendingStart(streamID: UUID? = nil) {
+        guard streamID == nil || activeStartLease?.streamID == streamID else { return }
+        activeStartLease = nil
+    }
+
+    private func handleResult(_ result: SpeechTranscriber.Result, runtime: StreamingRuntime) {
+        acceptTextResult(String(result.text.characters), isFinal: result.isFinal, runtime: runtime)
+    }
+
+    private func acceptTextResult(_ text: String, isFinal: Bool, runtime: StreamingRuntime) {
+        guard activeRuntime === runtime, runtime.acceptsResults else {
             // 「音声は届いたのに文字起こしが空」の有力候補。ここで捨てていると、症状は
             // モデルが何も返さなかった場合と区別がつかないので件数だけ残す。
-            streamDiagnostics?.recordRejectedResult()
+            runtime.diagnostics.recordRejectedResult()
             return
         }
-        if result.isFinal {
-            finalizedSegments.append(String(result.text.characters))
-            partialText = finalizedSegments.joined()
+        if isFinal {
+            runtime.finalizedSegments.append(text)
+            runtime.partialText = runtime.finalizedSegments.joined()
         } else {
-            let volatile = String(result.text.characters)
-            partialText = finalizedSegments.joined() + volatile
+            runtime.partialText = runtime.finalizedSegments.joined() + text
         }
-        streamDiagnostics?.recordResult(isFinal: result.isFinal)
-        partialResultHandler?(streamID, partialText, result.isFinal)
+        partialText = runtime.partialText
+        runtime.diagnostics.recordResult(isFinal: isFinal)
+        runtime.partialResultHandler?(runtime.streamID, runtime.partialText, isFinal)
+    }
+
+    private func installBufferPipeline(
+        on runtime: StreamingRuntime,
+        inputContinuation: AsyncStream<AnalyzerInput>.Continuation?
+    ) {
+        let diagnostics = runtime.diagnostics
+        let streamID = runtime.streamID
+        let didConsumeBuffer = lifecycleTestSeam?.didConsumeBuffer
+        let (bufferStream, bufferContinuation) = AsyncStream<AVAudioPCMBuffer>.makeStream()
+        runtime.bufferQueue = bufferContinuation
+        runtime.bufferConsumerTask = Task.detached(priority: .userInitiated) {
+            for await buffer in bufferStream {
+                diagnostics.recordConsumerBuffer()
+                inputContinuation?.yield(AnalyzerInput(buffer: buffer))
+                didConsumeBuffer?(streamID)
+            }
+        }
     }
 
     /// 旧録音のcallbackが次の録音へ混入しないための、stream ID照合。
@@ -577,9 +722,10 @@ final class TranscriptionEngine: ObservableObject {
     /// 直接inputBuilderへappendせず、単一消費Taskが順番に処理するbufferQueueへyieldすることで
     /// 到着順を保証する。
     func appendAudio(_ buffer: AVAudioPCMBuffer, streamID: UUID? = nil) {
-        guard streamID == nil || streamID == activeStreamID else { return }
-        streamDiagnostics?.recordSourceBuffer()
-        bufferQueue?.yield(buffer)
+        guard let runtime = activeRuntime,
+              streamID == nil || streamID == runtime.streamID else { return }
+        runtime.diagnostics.recordSourceBuffer()
+        runtime.bufferQueue?.yield(buffer)
     }
 
     /// 録音中のホットパス専用の受け口。**MainActorを経由しない。**
@@ -593,8 +739,8 @@ final class TranscriptionEngine: ObservableObject {
     /// continuation に束縛される**。録音が終わると continuation は finish 済みになり、
     /// 以後の yield は無視される。古い録音の受け口が残っていても次の録音へは混入しない。
     func makeAudioSink() -> @Sendable (AVAudioPCMBuffer) -> Void {
-        let continuation = bufferQueue
-        let diagnostics = streamDiagnostics
+        let continuation = activeRuntime?.bufferQueue
+        let diagnostics = activeRuntime?.diagnostics
         return { buffer in
             diagnostics?.recordSourceBuffer()
             continuation?.yield(buffer)
@@ -650,27 +796,21 @@ final class TranscriptionEngine: ObservableObject {
 
     /// 録音終了。バッファを閉じ、確定結果が出揃うのを待って全文を返す。
     func stopStreaming(streamID: UUID? = nil) async -> String {
-        guard streamID == nil || streamID == activeStreamID else { return "" }
-        if let activeStopTask {
-            return await activeStopTask.value
+        if streamID == nil || streamID == activeStartLease?.streamID {
+            activeStartLease = nil
         }
-        guard isStreaming else {
-            return finalizedSegments.joined()
+        guard let runtime = activeRuntime,
+              streamID == nil || streamID == runtime.streamID else { return "" }
+        if let stopTask = runtime.stopTask {
+            return await stopTask.value
         }
-
-        let token = UUID()
-        let expectedStreamID = activeStreamID
-        let task = Task { @MainActor [weak self] in
-            guard let self else { return "" }
-            return await self.finishStreaming(expectedStreamID: expectedStreamID)
+        let task = Task { @MainActor [weak self, weak runtime] in
+            guard let self, let runtime else { return "" }
+            return await self.finishStreaming(runtime: runtime)
         }
-        activeStopTask = task
-        activeStopTaskToken = token
+        runtime.stopTask = task
         let result = await task.value
-        if activeStopTaskToken == token {
-            activeStopTask = nil
-            activeStopTaskToken = nil
-        }
+        runtime.stopTask = nil
         return result
     }
 
@@ -713,20 +853,19 @@ final class TranscriptionEngine: ObservableObject {
         return completedInTime
     }
 
-    private func finishStreaming(expectedStreamID: UUID?) async -> String {
-        guard expectedStreamID == activeStreamID else { return "" }
+    private func finishStreaming(runtime: StreamingRuntime) async -> String {
         // まずbufferQueueを閉じ、単一消費Taskが溜まっているバッファを全てinputBuilderへ
         // append し終えるのを待つ（順序保証を崩さないため、inputBuilder.finish()は
         // consumerの完了後に呼ぶ）。
-        bufferQueue?.finish()
-        bufferQueue = nil
-        await bufferConsumerTask?.value
-        bufferConsumerTask = nil
+        runtime.bufferQueue?.finish()
+        runtime.bufferQueue = nil
+        await runtime.bufferConsumerTask?.value
+        runtime.bufferConsumerTask = nil
 
-        inputBuilder?.finish()
-        inputBuilder = nil
+        runtime.inputBuilder?.finish()
+        runtime.inputBuilder = nil
 
-        if let analyzer {
+        if let analyzer = runtime.analyzer {
             let finalized = await Self.withTimeout(Self.finalizeTimeoutSeconds) {
                 do {
                     try await analyzer.finalizeAndFinishThroughEndOfInput()
@@ -737,26 +876,27 @@ final class TranscriptionEngine: ObservableObject {
             if !finalized {
                 // ここで無期限に待つと、HUDが固まりESCも実質的な打ち切りにならない
                 // （2026-07-30の実機障害では12秒待った）。その時点の確定分で返す。
-                didTimeOutDuringFinishStreaming = true
-                streamDiagnostics?.recordFinishTimeout()
+                runtime.didTimeOutDuringFinish = true
+                runtime.diagnostics.recordFinishTimeout()
                 AppLog.shared.warn(String(
                     format: "[TranscriptionEngine] finalizeが%.0f秒で完了しないため打ち切ります",
                     Self.finalizeTimeoutSeconds
                 ))
             }
         }
-        if await !Self.withTimeout(Self.finalizeTimeoutSeconds, operation: { await self.resultsTask?.value }) {
-            didTimeOutDuringFinishStreaming = true
-            streamDiagnostics?.recordFinishTimeout()
+        let finishTimeoutSeconds = lifecycleTestSeam?.finishTimeoutSeconds ?? Self.finalizeTimeoutSeconds
+        if await !Self.withTimeout(finishTimeoutSeconds, operation: { await runtime.resultsTask?.value }) {
+            runtime.didTimeOutDuringFinish = true
+            runtime.acceptsResults = false
+            runtime.diagnostics.recordFinishTimeout()
             AppLog.shared.warn("[TranscriptionEngine] 結果ストリームのドレインを打ち切ります")
             // 放棄したtaskが後から finalizedSegments を書き換えると、返す本文が
             // 実行タイミング依存になる。IDを外して以後の結果を受理しない。
-            resultsTask?.cancel()
-            activeStreamID = nil
+            runtime.resultsTask?.cancel()
         }
-        resultsTask = nil
-        self.analyzer = nil
-        self.activeTranscriber = nil
+        runtime.resultsTask = nil
+        runtime.analyzer = nil
+        runtime.transcriber = nil
 
         // 次回startStreamingとの並走リスクを排除するため、analyzer.startの投入Taskの
         // 終了を待ってからnil化する。
@@ -766,21 +906,25 @@ final class TranscriptionEngine: ObservableObject {
         // 打ち切りを入れた意味がなくなる（2026-07-30の実機障害の再現条件そのもの）。
         if await !Self.withTimeout(
             Self.finalizeTimeoutSeconds,
-            operation: { await self.analyzerStartTask?.value }
+            operation: { await runtime.analyzerStartTask?.value }
         ) {
-            didTimeOutDuringFinishStreaming = true
-            streamDiagnostics?.recordFinishTimeout()
+            runtime.didTimeOutDuringFinish = true
+            runtime.diagnostics.recordFinishTimeout()
             AppLog.shared.warn("[TranscriptionEngine] analyzer.startの回収を打ち切ります")
-            analyzerStartTask?.cancel()
-            activeStreamID = nil
+            runtime.analyzerStartTask?.cancel()
         }
-        analyzerStartTask = nil
+        runtime.analyzerStartTask = nil
 
-        let transcript = finalizedSegments.joined()
-        streamDiagnostics?.logSummary()
-        streamDiagnostics = nil
-        activeStreamID = nil
-        partialResultHandler = nil
+        let transcript = runtime.finalizedSegments.joined()
+        runtime.diagnostics.logSummary()
+        if activeRuntime === runtime {
+            didTimeOutDuringFinishStreaming = runtime.didTimeOutDuringFinish
+            activeRuntime = nil
+        }
         return transcript
     }
+
+    var debugActiveStreamID: UUID? { activeRuntime?.streamID }
+    var debugLocaleIdentifier: String { locale.identifier(.bcp47) }
+    var debugHasActiveReconfigurationLease: Bool { activeReconfigurationLease != nil }
 }

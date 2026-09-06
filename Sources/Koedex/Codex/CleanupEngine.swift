@@ -72,6 +72,57 @@ enum CleanupThreadRotationPolicy {
         if let threadAgeSeconds, threadAgeSeconds >= maximumThreadAgeSeconds { return true }
         return false
     }
+
+    /// 録音開始時だけ、threadの年齢に先読み分を足して判定する。
+    ///
+    /// 録音開始時点で残り20秒のthreadは`shouldRotate`では「まだ使える」となるが、
+    /// 発話が終わる頃には期限を超えていて、結局利用者を待たせて作り直すことになる。
+    /// 実機ログの録音長はp25=3.8秒・p50=7.5秒なので、この先読みが無いと
+    /// 先回りの効果が大きく削がれる。**`shouldRotate`自体は変更しない**ので、
+    /// 整形時の閾値は12turn / 600秒のまま。
+    static let recordingLeadTimeSeconds: TimeInterval = 30
+
+    static func shouldRotateBeforeRecording(turnCount: Int, threadAgeSeconds: TimeInterval?) -> Bool {
+        shouldRotate(
+            turnCount: turnCount,
+            threadAgeSeconds: threadAgeSeconds.map { $0 + recordingLeadTimeSeconds }
+        )
+    }
+}
+
+/// 録音開始時にthreadへ手を入れるかどうか。副作用を持たせず回帰テストで境界を固定する。
+///
+/// `hasActiveTurn` があるのは、`recoveryGeneration` だけでは実行中の `runTurn` を守れないため。
+/// 同じgenerationのまま割り込むと、実行中threadを差し替えてしまい、`threadTurnCount`の加算と
+/// single-use latchの設定（どちらも `self.threadId == threadId` が条件）が両方失われる。
+enum CleanupThreadPrewarmPolicy {
+    enum Decision: Equatable {
+        case skip
+        case createThread
+        case replaceThread
+    }
+
+    static func decision(
+        requiresSingleUseThreads: Bool,
+        hasActiveTurn: Bool,
+        hasThread: Bool,
+        threadPromptLanguage: AppLanguage?,
+        promptLanguage: AppLanguage,
+        turnCount: Int,
+        threadAgeSeconds: TimeInterval?
+    ) -> Decision {
+        // 使い捨てthread運用では先回りしても次のcleanupが捨てるだけ。
+        if requiresSingleUseThreads { return .skip }
+        // 実行中のturnがあるthreadには触れない。
+        if hasActiveTurn { return .skip }
+        guard hasThread else { return .createThread }
+        if threadPromptLanguage != promptLanguage { return .replaceThread }
+        if CleanupThreadRotationPolicy.shouldRotateBeforeRecording(
+            turnCount: turnCount,
+            threadAgeSeconds: threadAgeSeconds
+        ) { return .replaceThread }
+        return .skip
+    }
 }
 
 /// cleanupの開始から最終応答まで共有する、利用者待機用の総期限。
@@ -140,6 +191,32 @@ actor CleanupEngine {
     /// generationを進め、古いbackground taskはthreadを採用できない。
     private var recoveryGeneration = 0
     private var recoveryTask: Task<Void, Never>?
+    /// 実行中の `runTurn` の本数。**`recoveryGeneration` はthreadの排他所有権ではない。**
+    /// generationが進むのは新しいcleanupが始まった時だけなので、同じgenerationを持ったまま
+    /// 割り込んだ呼び出しは、実行中turnのthreadを差し替えられてしまう。そうなると
+    /// `threadTurnCount` の加算もsingle-use latchの設定も（どちらも `self.threadId == threadId`
+    /// が条件のため）静かに失われる。turnが走っている間はthreadに触れさせないためのlease。
+    private var activeTurnCount = 0
+    /// 録音開始時の先回り。**`recoveryTask` とは別ハンドルにする。**流用すると、
+    /// app-server再起動を含む失敗復旧を先回りがcancelしてしまい、
+    /// 「クラッシュ直後に録音」で復旧が失われる。
+    private var prewarmTask: Task<Void, Never>?
+    /// 先回りを開始したsessionのID。取消は「そのsessionの先回りだけ」を止める。
+    /// **これが無いと取消が別sessionの先回りを巻き添えにする。** 発火も取消も
+    /// MainActorから別々のTaskで届き、到着順が保証されないため。
+    private var prewarmSessionID: String?
+    /// 先回りより先に取消が届いたsessionのID。あとから来た発火要求を捨てるために持つ。
+    private var cancelledPrewarmSessionID: String?
+    /// 進行中の `thread/start`。**これが無いと `threadId` は応答が返るまでnilのまま**なので、
+    /// cleanup・recovery・先回りがそれぞれ「threadが無い」と判断して重複してRPCを送り、
+    /// 片方のthreadが必ず孤児になる（このリポジトリに `thread/close` は無い）。
+    /// app-server起動側は `clientStartupTask` で既に同じ問題を解いているので、その形を踏襲する。
+    private var threadPreparationTask: Task<String, Error>?
+    private var threadPreparationLanguage: AppLanguage?
+    /// 公開中の `thread/start` が最悪いつまで掛かり得るか。**合流の可否判断に使う。**
+    /// これが無いと、15秒の総期限を持つcleanupが20秒期限の先回りタスクへ合流し、
+    /// 期限を超えて待たされる（＝変更前より悪化する）。
+    private var threadPreparationDeadline: Date?
     /// app-serverの起動とinitializeハンドシェイクは1本だけに束ねる。
     /// `CodexAppServerClient.isRunning` は子process起動後にtrueになるため、これを持たずに
     /// actorの再入可能な`await`を越えると、initialize前のclientをreadyと誤認し得る。
@@ -152,6 +229,10 @@ actor CleanupEngine {
     private let japaneseSystemPromptTemplate: String
     private let englishSystemPromptTemplate: String
     private let operationTimeoutSeconds: Double = 15
+    /// 録音開始時の先回りが `thread/start` に許す時間。`operationTimeoutSeconds` より
+    /// 十分短くして、直後に始まったcleanupが安全に合流できるようにする。
+    /// 実測の `thread/start` は0.14〜0.38秒なので、10秒は十分に余裕がある。
+    private static let recordingPrewarmTimeoutSeconds: Double = 10
 
     init(executablePath: String? = nil, modelSettings: CodexModelSettings = .default) {
         self.executablePath = executablePath
@@ -226,12 +307,11 @@ actor CleanupEngine {
             ))
             return
         }
-        if threadId == nil || threadPromptLanguage != promptLanguage {
-            adoptThread(
-                try await startThreadLogged(promptLanguage: promptLanguage),
-                promptLanguage: promptLanguage
-            )
-        }
+        _ = try await replaceThreadIfStillNeeded(
+            promptLanguage: promptLanguage,
+            generation: recoveryGeneration,
+            operationID: nil
+        )
         AppLog.shared.info(String(
             format: "[CleanupEngine] prewarmThread完了 %.2f秒 thread=%@",
             Date().timeIntervalSince(startedAt),
@@ -239,9 +319,170 @@ actor CleanupEngine {
         ))
     }
 
+    /// threadが要るか判断し、必要なら作って採用する。**採用は全ての条件が保たれた時だけ。**
+    ///
+    /// 判断からRPC送信までの間にawaitを挟まないので、決定はactor上で原子的に行われる。
+    /// awaitから戻ったあとは、割り込みが起きていないことを4点で確認してから採用する。
+    /// どれか1つでも崩れていれば、作ったthreadは採用せず捨てる（現行の挙動へ収束する）。
+    ///
+    /// 以前の `prewarmThread` はawait後に無条件で `adoptThread` していたため、
+    /// 割り込んだ呼び出しが確保したthreadを上書きし得た。ここはその修正でもある。
+    @discardableResult
+    private func replaceThreadIfStillNeeded(
+        promptLanguage: AppLanguage,
+        generation: Int,
+        operationID: String?,
+        timeoutSeconds: Double = 20
+    ) async throws -> Bool {
+        let decision = CleanupThreadPrewarmPolicy.decision(
+            requiresSingleUseThreads: requiresSingleUseThreads,
+            hasActiveTurn: activeTurnCount > 0,
+            hasThread: threadId != nil,
+            threadPromptLanguage: threadPromptLanguage,
+            promptLanguage: promptLanguage,
+            turnCount: threadTurnCount,
+            threadAgeSeconds: currentThreadAgeSeconds
+        )
+        guard decision != .skip else { return false }
+
+        let expectedThreadID = threadId
+        let observedClientGeneration = clientGeneration
+        let id = try await startThreadShared(
+            promptLanguage: promptLanguage,
+            timeoutSeconds: timeoutSeconds,
+            operationID: operationID
+        )
+
+        guard !Task.isCancelled,
+              generation == recoveryGeneration,
+              observedClientGeneration == clientGeneration,
+              threadId == expectedThreadID,
+              activeTurnCount == 0,
+              !requiresSingleUseThreads
+        else {
+            // 待っている間に状況が変わった。作ったthreadは採用しない。
+            // app-server側に `thread/close` が無いため、このthreadはサーバ側に残る。
+            // 頻度が測れるよう、採用しなかったこと自体をログに残す。
+            AppLog.shared.info(
+                "[CleanupEngine] 先回りthreadを採用しませんでした（状態が変化） thread=\(id)"
+            )
+            return false
+        }
+        adoptThread(id, promptLanguage: promptLanguage)
+        return true
+    }
+
+    /// 録音開始時に呼ぶ。期限切れが近いthreadの作り直しを、利用者の待ち時間の外で済ませる。
+    ///
+    /// **app-serverプロセスは起動しない。** `startClientIfNeeded()` を呼ばないのは意図的で、
+    /// `CodexPathResolver` のシェル探索（最大15秒ブロック）やプロセス起動が録音開始経路へ
+    /// 載る余地を無くすため。clientが落ちていれば何もせず降り、次のcleanupが今までどおり
+    /// その場で起動し直す。
+    ///
+    /// awaitを含まないので、判断とtask生成はactor上で原子的に行われる。
+    /// 先回りが不要な通常ケース（実測で約75%）ではTaskすら作らない。
+    func prepareThreadForRecording(promptLanguage: AppLanguage, correlationID: String) {
+        let decision = CleanupThreadPrewarmPolicy.decision(
+            requiresSingleUseThreads: requiresSingleUseThreads,
+            hasActiveTurn: activeTurnCount > 0,
+            hasThread: threadId != nil,
+            threadPromptLanguage: threadPromptLanguage,
+            promptLanguage: promptLanguage,
+            turnCount: threadTurnCount,
+            threadAgeSeconds: currentThreadAgeSeconds
+        )
+        guard decision != .skip else { return }
+        // 取消が先に届いていたsessionの発火要求は捨てる（到着順は保証されない）。
+        guard correlationID != cancelledPrewarmSessionID else { return }
+
+        let generation = recoveryGeneration
+        prewarmTask?.cancel()
+        prewarmSessionID = correlationID
+        prewarmTask = Task { [weak self] in
+            await self?.prepareThreadBeforeRecording(
+                promptLanguage: promptLanguage,
+                generation: generation,
+                correlationID: correlationID
+            )
+            await self?.finishRecordingPrewarm(correlationID: correlationID)
+        }
+    }
+
+    /// 録音開始時の先回りを止める。録音開始が失敗・中断した時に呼ぶ。
+    /// `correlationID` を渡すとそのsessionの先回りだけを止める。nilなら無条件に止める
+    /// （アプリ終了時など、session単位で絞る意味が無い場面用）。
+    func cancelRecordingPrewarm(correlationID: String? = nil) {
+        if let correlationID {
+            cancelledPrewarmSessionID = correlationID
+            guard prewarmSessionID == correlationID else { return }
+        }
+        prewarmTask?.cancel()
+        prewarmTask = nil
+        prewarmSessionID = nil
+    }
+
+    /// 正常終了した先回りのハンドルを片付ける。完了済みTaskを次の録音まで抱え込まない。
+    private func finishRecordingPrewarm(correlationID: String) {
+        guard prewarmSessionID == correlationID else { return }
+        prewarmTask = nil
+        prewarmSessionID = nil
+    }
+
+    private func prepareThreadBeforeRecording(
+        promptLanguage: AppLanguage,
+        generation: Int,
+        correlationID: String
+    ) async {
+        guard generation == recoveryGeneration, !Task.isCancelled, clientStartupTask == nil else { return }
+        // clientが動いている時だけ先へ進む。ここでプロセスを起動してはならない。
+        let observedGeneration = clientGeneration
+        let observedClient = client
+        let running = await observedClient.isRunning
+        guard running,
+              observedGeneration == clientGeneration,
+              clientStartupTask == nil,
+              generation == recoveryGeneration,
+              !Task.isCancelled
+        else { return }
+
+        let startedAt = Date()
+        do {
+            let adopted = try await replaceThreadIfStillNeeded(
+                promptLanguage: promptLanguage,
+                generation: generation,
+                operationID: "prewarm-\(correlationID)",
+                // 利用者を待たせないための先回りなので、cleanupの総期限(15秒)より
+                // 短くする。こうしないと、直後に始まったcleanupが「残り時間に収まらない」と
+                // 判断して合流できず、thread/startが二重に飛ぶ。
+                timeoutSeconds: Self.recordingPrewarmTimeoutSeconds
+            )
+            if adopted {
+                AppLog.shared.info(String(
+                    format: "[CleanupEngine] prewarmThread完了 %.2f秒 thread=%@",
+                    Date().timeIntervalSince(startedAt),
+                    threadId ?? "<none>"
+                ))
+            }
+        } catch {
+            guard !Task.isCancelled, generation == recoveryGeneration else { return }
+            AppLog.shared.warn(
+                "[CleanupEngine] prewarm failed id=prewarm-\(correlationID) "
+                    + "reason=\(Self.telemetryFailureName(Self.normalizedError(error)))"
+            )
+        }
+    }
+
     func shutdown() async {
         recoveryTask?.cancel()
         recoveryTask = nil
+        // 停止するclientに対する thread/start を残さない。合流待ちの呼び出しも
+        // ここでcancelを受け取り、停止後のthread IDを採用しない。
+        prewarmTask?.cancel()
+        prewarmTask = nil
+        threadPreparationTask?.cancel()
+        threadPreparationTask = nil
+        threadPreparationLanguage = nil
+        threadPreparationDeadline = nil
         clientStartupTask?.cancel()
         clientStartupTask = nil
         clientStartupToken = nil
@@ -315,12 +556,20 @@ actor CleanupEngine {
         let newClient = CodexAppServerClient(executablePath: executablePath, modelSettings: modelSettings)
         self.client = newClient
         clientGeneration &+= 1
+        let observedClientGeneration = clientGeneration
         let startupToken = UUID()
         // clientへcallbackを登録するawaitより先にtaskを公開する。ここで先にawaitすると、
         // actor再入時の2本目が「まだ起動していない」と見て別clientを作り得る。
         let startupTask = Task { [weak self] in
-            await newClient.setOnProcessExit { [weak self] status in
-                Task { await self?.handleProcessExit(status: status) }
+            await newClient.setOnProcessExit { [weak self, weak newClient] status in
+                guard let newClient else { return }
+                Task {
+                    await self?.handleProcessExit(
+                        status: status,
+                        client: newClient,
+                        generation: observedClientGeneration
+                    )
+                }
             }
             try await newClient.start(timeoutSeconds: timeoutSeconds)
         }
@@ -351,10 +600,38 @@ actor CleanupEngine {
         ))
     }
 
-    private func handleProcessExit(status: Int32) {
+    private func handleProcessExit(
+        status: Int32,
+        client observedClient: CodexAppServerClient,
+        generation observedGeneration: Int
+    ) {
+        guard observedGeneration == clientGeneration, client === observedClient else { return }
         logger.info("[CleanupEngine] codex app-serverが終了しました(status=\(status))。次回呼び出し時に再起動します")
         clearThread()
     }
+
+    func debugReplaceClientForLifecycleTest(
+        _ replacement: CodexAppServerClient,
+        threadID: String
+    ) async {
+        client = replacement
+        clientGeneration &+= 1
+        let generation = clientGeneration
+        self.threadId = threadID
+        await replacement.setOnProcessExit { [weak self, weak replacement] status in
+            guard let replacement else { return }
+            Task {
+                await self?.handleProcessExit(
+                    status: status,
+                    client: replacement,
+                    generation: generation
+                )
+            }
+        }
+    }
+
+    var debugThreadID: String? { threadId }
+    var debugHasThreadPreparation: Bool { threadPreparationTask != nil }
 
     /// 生トランスクリプトを整形する。ユーザー辞書とカスタムインストラクションがあればプロンプトへ追記する。
     /// タイムアウト・エラー時は例外を投げるので、呼び出し側で生トランスクリプトへのフォールバックを行うこと。
@@ -375,6 +652,9 @@ actor CleanupEngine {
         recoveryGeneration &+= 1
         recoveryTask?.cancel()
         recoveryTask = nil
+        // 世代を進めた時点で先回りは採用できなくなるが、無駄に走らせない。
+        prewarmTask?.cancel()
+        prewarmTask = nil
         AppLog.shared.info(
             "[CleanupEngine] begin id=\(operationID) mode=\(mode.rawValue) "
                 + "model=\(modelSettings.selectedModelSlug) effort=\(modelSettings.selectedReasoningEffort) "
@@ -405,7 +685,7 @@ actor CleanupEngine {
             }
             if threadId == nil || threadPromptLanguage != promptLanguage {
                 adoptThread(
-                    try await startThreadLogged(
+                    try await startThreadShared(
                         promptLanguage: promptLanguage,
                         timeoutSeconds: try deadline.remainingOrThrow(),
                         operationID: operationID
@@ -425,7 +705,7 @@ actor CleanupEngine {
             )
             AppLog.shared.info("[CleanupEngine] turn_begin id=\(operationID) thread=\(threadId) promptChars=\(prompt.count)")
 
-            let result = try await runTurn(
+            let result = try await runTurnHoldingLease(
                 threadId: threadId,
                 prompt: prompt,
                 timeoutSeconds: try deadline.remainingOrThrow(),
@@ -493,6 +773,47 @@ actor CleanupEngine {
         }
     }
 
+    /// `thread/start` を1本に束ねる。**awaitへ入る前にtaskを公開する**ので、
+    /// 同じ言語を求める後続（cleanup・recovery・録音開始時の先回り）は新たにRPCを
+    /// 送らずここへ合流する。`clientStartupTask` と同じ形。
+    /// 言語が違う場合だけは別のthreadが要るので、待たずに独立して開始する。
+    private func startThreadShared(
+        promptLanguage: AppLanguage,
+        timeoutSeconds: Double = 20,
+        operationID: String? = nil
+    ) async throws -> String {
+        // 合流してよいのは、公開中タスクの残り時間が呼び出し側の予算に収まる時だけ。
+        // 収まらない場合は独立して投げる（重複RPCは1本増えるが、利用者を期限超過で
+        // 待たせるより優先度が高い）。
+        if let threadPreparationTask,
+           threadPreparationLanguage == promptLanguage,
+           let deadline = threadPreparationDeadline,
+           deadline.timeIntervalSinceNow <= timeoutSeconds {
+            AppLog.shared.info("[CleanupEngine] thread/startの進行中要求へ合流します")
+            return try await threadPreparationTask.value
+        }
+        // 合流待ちが `self` を必要とするため強参照で保持する。完了時にdeferでスロットを空ける。
+        let task = Task { [self] in
+            try await startThreadLogged(
+                promptLanguage: promptLanguage,
+                timeoutSeconds: timeoutSeconds,
+                operationID: operationID
+            )
+        }
+        threadPreparationTask = task
+        threadPreparationLanguage = promptLanguage
+        threadPreparationDeadline = Date().addingTimeInterval(timeoutSeconds)
+        defer {
+            // 自分が公開したtaskだけを片付ける。await中に別言語で張り替えられている場合は触らない。
+            if threadPreparationTask == task {
+                threadPreparationTask = nil
+                threadPreparationLanguage = nil
+                threadPreparationDeadline = nil
+            }
+        }
+        return try await task.value
+    }
+
     private func startThreadLogged(
         promptLanguage: AppLanguage,
         timeoutSeconds: Double = 20,
@@ -552,7 +873,7 @@ actor CleanupEngine {
             guard generation == recoveryGeneration,
                   !Task.isCancelled,
                   threadId == nil else { return }
-            let id = try await startThreadLogged(
+            let id = try await startThreadShared(
                 promptLanguage: promptLanguage,
                 operationID: "recovery-\(originatingOperationID)"
             )
@@ -786,6 +1107,24 @@ actor CleanupEngine {
             "approvalPolicy": "never",
             "developerInstructions": developerInstructions(for: promptLanguage),
         ], timeoutSeconds: timeoutSeconds)
+    }
+
+    /// turnが走っている間はthreadを差し替えさせない（`activeTurnCount` の宣言を参照）。
+    /// `defer` で減算するので、正常終了・throw・キャンセルのどの経路でもleaseは必ず解放される。
+    private func runTurnHoldingLease(
+        threadId: String,
+        prompt: String,
+        timeoutSeconds: Double,
+        operationID: String
+    ) async throws -> String {
+        activeTurnCount += 1
+        defer { activeTurnCount -= 1 }
+        return try await runTurn(
+            threadId: threadId,
+            prompt: prompt,
+            timeoutSeconds: timeoutSeconds,
+            operationID: operationID
+        )
     }
 
     /// turn/start を送り、item/completed(final_answer) の本文を待って完了とする。

@@ -60,7 +60,7 @@ final class OnboardingPracticeController: ObservableObject {
                 // 既存のengine設定へ戻したまま、練習を開始しない。
                 try await self.transcriptionEngine.reconfigure(to: language)
                 guard self.liveSessionID == sessionID else { return }
-                let targetFormat = try await self.transcriptionEngine.startStreaming()
+                let targetFormat = try await self.transcriptionEngine.startStreaming(streamID: sessionID)
                 self.activeStreamingSessionID = sessionID
                 guard self.liveSessionID == sessionID else {
                     _ = await self.stopStreaming(for: sessionID)
@@ -105,6 +105,7 @@ final class OnboardingPracticeController: ObservableObject {
     func stopLivePractice() {
         guard (isRecording || state == .preparing), let sessionID = liveSessionID else { return }
         liveSessionID = nil
+        transcriptionEngine.cancelPendingStart(streamID: sessionID)
         isCleaningUp = true
         Task { [weak self] in
             guard let self else { return }
@@ -139,6 +140,7 @@ final class OnboardingPracticeController: ObservableObject {
     func resetAndWait() async {
         let sessionID = liveSessionID ?? activeStreamingSessionID ?? pendingStartSessionID
         liveSessionID = nil
+        transcriptionEngine.cancelPendingStart(streamID: sessionID)
         isCleaningUp = sessionID != nil || stoppingStreamingSessionID != nil
         await recorder.stop()
         if let sessionID {
@@ -155,7 +157,7 @@ final class OnboardingPracticeController: ObservableObject {
         guard activeStreamingSessionID == sessionID else { return nil }
         activeStreamingSessionID = nil
         stoppingStreamingSessionID = sessionID
-        let result = await transcriptionEngine.stopStreaming()
+        let result = await transcriptionEngine.stopStreaming(streamID: sessionID)
         if stoppingStreamingSessionID == sessionID {
             stoppingStreamingSessionID = nil
         }

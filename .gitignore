@@ -3,6 +3,10 @@
 .swiftpm/
 Package.resolved
 
+# Python test caches
+__pycache__/
+*.py[cod]
+
 # Xcode
 *.xcodeproj/
 DerivedData/

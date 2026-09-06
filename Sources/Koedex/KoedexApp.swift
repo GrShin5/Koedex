@@ -25,6 +25,8 @@ struct AICommandFailureOwnership {
 
 extension Notification.Name {
     static let koedexOpenSettings = Notification.Name("Koedex.openSettings")
+    static let koedexOpenDictionaryRecovery = Notification.Name("Koedex.openDictionaryRecovery")
+    static let koedexOpenHistoryStorage = Notification.Name("Koedex.openHistoryStorage")
 }
 
 /// Dockの再オープン時に、可視ウィンドウとセットアップ状態から表示先を決める。
@@ -347,7 +349,10 @@ struct KoedexApp: App {
                 }
                 maxSkips = parsed
             }
-            exit(RegressionTestSuite.run(maxSkips: maxSkips))
+            Task { @MainActor in
+                exit(await RegressionTestSuite.run(maxSkips: maxSkips))
+            }
+            RunLoop.main.run()
         }
 
         if let idx = args.firstIndex(of: "--test-pidfile-guard"), idx + 1 < args.count,
@@ -511,6 +516,17 @@ struct MenuBarContentView: View {
                 systemImage: "exclamationmark.triangle"
             )
         }
+        if let storageNotice = appDelegate.storageNotice {
+            Label(AppLocalizer.textOrLiteral(storageNotice, language: uiLanguage), systemImage: "externaldrive.badge.exclamationmark")
+            Button(AppLocalizer.text("ストレージの問題を確認", language: uiLanguage)) {
+                openWindow(id: "main-window")
+                NSApp.activate(ignoringOtherApps: true)
+                NotificationCenter.default.post(
+                    name: appDelegate.personalDictionaryStore.requiresRecovery ? .koedexOpenDictionaryRecovery : .koedexOpenHistoryStorage,
+                    object: nil
+                )
+            }
+        }
         Divider()
         Menu(AppLocalizer.text("マイクを選択", language: uiLanguage)) {
             Button {
@@ -654,6 +670,28 @@ enum AIProcessingResetPolicy {
         case .starting, .recording, .transcribing, .cleaning, .inserting:
             return false
         }
+    }
+}
+
+/// 録音開始時にcleanup threadの先回り準備を走らせてよい条件。純関数にして回帰テストで固定する。
+///
+/// ここで見るのは「UIとして先回りする資格があるか」だけ。実際にthreadへ触れてよいかは
+/// `CleanupThreadPrewarmPolicy` がactor内の状態（実行中turn・single-use latch・thread年齢）を
+/// 見て決める。二段に分けているのは、actorのprivate stateをMainActor側へ漏らさないため。
+///
+/// `.connected` を要求するのは保守的な判断。app-serverが落ちている時に先回りを走らせても、
+/// 先回りはプロセスを起動しない設計なので何もできない。次のcleanupが今までどおり
+/// その場で起動し直し、成功すればこのゲートも開く。
+enum RecordingStartPrewarmPolicy {
+    static func shouldPrewarm(
+        mode: VoiceMode,
+        cleanupEnabled: Bool,
+        codexStatus: AppDelegate.CodexConnectionStatus
+    ) -> Bool {
+        // 「AIに指示」はAICommandEngineを通るため、CleanupEngineのthreadは使わない。
+        guard mode == .voiceInput else { return false }
+        guard cleanupEnabled else { return false }
+        return codexStatus == .connected
     }
 }
 
@@ -1090,6 +1128,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var hud: RecordingHUDController!
     private var onboardingController: OnboardingWindowController!
     private var settingsCancellable: AnyObjectHolder?
+    private var dictionaryCancellable: AnyObjectHolder?
+    private var dictionaryRecoveryPhaseCancellable: AnyObjectHolder?
     private var autoStopTask: Task<Void, Never>?
     private var recordingStartTask: Task<Void, Never>?
     private var recordingStartTaskSessionID: UUID?
@@ -1108,8 +1148,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private var confirmedAICommandWebRetryID: UUID?
     private var completedNormalInputCount = 0
     private var aiCommandCaptureTask: Task<Void, Never>?
-    private var aiCommandCaptureID: UUID?
+    private let aiCommandCaptureCompletionGate = AICommandCaptureCompletionGate()
     private var aiCommandCaptureTimeoutTask: Task<Void, Never>?
+    private var pendingClipboardCancellationReceipt: ClipboardCancellationReceipt?
+    private var pendingClipboardCancellationWindowID: UUID?
+    private var pendingClipboardCancellationExpiryTask: Task<Void, Never>?
     private var menuBarWarningTask: Task<Void, Never>?
     private var didLogTerminationOrigin = false
     private var activeVoiceSession: VoiceSession? {
@@ -1155,6 +1198,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
     )
     private var consecutiveUnclassifiedRPCFailures = 0
+    private var didOfferDictionaryRecovery = false
     private static let unclassifiedRPCFailureWarningThreshold = 3
 
     @Published var menuBarIconName = "mic"
@@ -1167,6 +1211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     /// ディスクへは書かない。履歴（`InputHistoryStore`）へも渡さない。次のAI実行で
     /// 上書きされ、アプリ終了で消える。
     @Published private(set) var lastAICommandOutput: String?
+    @Published private(set) var storageNotice: String?
 
     /// メニューバーの「最後のAI出力をコピー」からだけ呼ぶ、利用者の明示操作。
     ///
@@ -1242,19 +1287,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "development"
         let revision = bundle.object(forInfoDictionaryKey: "KoedexBuildGitSHA") as? String ?? "unknown"
         AppLog.shared.info("[Telemetry] launch version=\(version) build=\(build) revision=\(revision)")
+        if personalDictionaryStore.requiresRecovery {
+            storageNotice = "ユーザー辞書を読み込めないため、辞書を使わずに音声入力します。設定のユーザー辞書から復旧してください。"
+        }
         // 設定が読めなかった場合、settingsはメモリ上の既定値になっている。その既定の
         // 保持期間でpruneすると、ユーザーが選んでいない基準で履歴が削除される。
         // 保存が無効化されている間は、履歴も消さない。
         if settingsStore.canSave {
-            inputHistoryStore.prune(retentionDays: settingsStore.settings.historyRetentionDays)
-            inputHistoryStore.prune(
+            let normalPrune = inputHistoryStore.prune(retentionDays: settingsStore.settings.historyRetentionDays)
+            let aiPrune = inputHistoryStore.prune(
                 mode: InputHistoryMode.aiCommand,
                 retentionDays: settingsStore.settings.aiCommandSettings.historyRetentionDays
             )
-            inputHistoryStore.prune(
+            let handsFreePrune = inputHistoryStore.prune(
                 mode: InputHistoryMode.handsFreeSend,
                 retentionDays: settingsStore.settings.handsFreeSendSettings.historyRetentionDays
             )
+            if [normalPrune, aiPrune, handsFreePrune].contains(where: { $0 != .saved }) {
+                noteHistoryStorageFailure()
+            }
         } else {
             AppLog.shared.warn("設定を読めなかったため、履歴の保持期間による削除は行いません")
         }
@@ -1316,6 +1367,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         if permissionManager.allGranted(), settingsStore.settings.setupProgress.isComplete {
             beginWarmUpAndStart()
             openSettingsWindow()
+            offerDictionaryRecoveryIfNeeded()
         } else {
             AppLog.shared.info("必要な権限または初回設定が未完了のため、セットアップを表示します")
             onboardingController.showIfNeeded { [weak self] mode in
@@ -1338,6 +1390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         AppLog.shared.info("オンボーディング完了。warmUpを開始します")
         beginWarmUpAndStart()
+        offerDictionaryRecoveryIfNeeded()
 
         guard mode.opensSettingsAfterFinish else { return }
         openSettingsWindow()
@@ -1348,7 +1401,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func openSettingsWindow() {
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: .koedexOpenSettings, object: nil)
+            if self.personalDictionaryStore.requiresRecovery {
+                NotificationCenter.default.post(name: .koedexOpenDictionaryRecovery, object: nil)
+            }
         }
+    }
+
+    private func offerDictionaryRecoveryIfNeeded() {
+        guard !didOfferDictionaryRecovery,
+              personalDictionaryStore.requiresRecovery,
+              appState.phase == .idle,
+              settingsStore.settings.setupProgress.isComplete,
+              permissionManager.allGranted() else { return }
+        didOfferDictionaryRecovery = true
+        aiCommandResultWindows.show(AICommandResultPayload(
+            spokenInstruction: "",
+            selectedText: nil,
+            answer: uiText("ユーザー辞書を読み込めませんでした。音声入力は辞書なしで利用できます。復旧方法は設定から確認できます。"),
+            sources: [],
+            title: "ユーザー辞書の復旧",
+            showsCopyButton: false,
+            actions: [
+                AICommandResultAction(
+                    id: "open_dictionary_recovery",
+                    title: "復旧方法を確認",
+                    style: .primary,
+                    handler: { [weak self] in self?.openSettingsWindow() }
+                ),
+                AICommandResultAction(
+                    id: "dictionary_recovery_later",
+                    title: "後で",
+                    style: .secondary,
+                    handler: {}
+                ),
+            ],
+            presentation: .nonactivatingConfirmation
+        ))
     }
 
     /// DockクリックやFinderからの再オープン時は、未完了セットアップを常に優先する。
@@ -1956,7 +2044,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
 
             if lastAICommandSettings.enabled && !newSettings.aiCommandSettings.enabled {
-                if self.activeVoiceSession?.mode == .aiCommand || self.aiCommandCaptureID != nil {
+                if self.activeVoiceSession?.mode == .aiCommand
+                    || self.aiCommandCaptureCompletionGate.activeCaptureID != nil {
                     _ = self.cancelRecording()
                 }
             }
@@ -2000,10 +2089,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
         }
         settingsCancellable = AnyObjectHolder(cancellable)
+
+        let dictionaryCancellable = personalDictionaryStore.$loadStatus.sink { [weak self] status in
+            guard let self else { return }
+            if case .recoveryRequired = status {
+                self.storageNotice = "ユーザー辞書を読み込めないため、辞書を使わずに音声入力します。設定のユーザー辞書から復旧してください。"
+                self.offerDictionaryRecoveryIfNeeded()
+            } else if self.storageNotice == "ユーザー辞書を読み込めないため、辞書を使わずに音声入力します。設定のユーザー辞書から復旧してください。" {
+                switch self.inputHistoryStore.loadStatus {
+                case .missing, .ready: self.storageNotice = nil
+                case .malformed, .unreadable: self.noteHistoryStorageFailure()
+                }
+            }
+        }
+        self.dictionaryCancellable = AnyObjectHolder(dictionaryCancellable)
+        let dictionaryRecoveryPhaseCancellable = appState.$phase.sink { [weak self] phase in
+            guard phase == .idle else { return }
+            self?.offerDictionaryRecoveryIfNeeded()
+        }
+        self.dictionaryRecoveryPhaseCancellable = AnyObjectHolder(dictionaryRecoveryPhaseCancellable)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
         invalidateAICommandWebRetry(.pendingAndRunning)
+        invalidateClipboardCancellationRecovery(closeWindow: true)
         // AppKitがここまで来た時だけ、reply後のteardownに対する締切を武装する。
         terminationCoordinator.confirmTermination()
         if OnboardingRuntimeProfile.isDebug {
@@ -2014,9 +2123,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         AppLog.shared.info("Koedex終了処理開始")
         textInjector.restorePendingScopedClipboardIfOwned()
         autoStopTask?.cancel()
+        transcriptionEngine.cancelPendingStart()
         recordingStartTask?.cancel()
+        Task { [cleanupEngine] in await cleanupEngine.cancelRecordingPrewarm() }
         recordingStartTimeoutTask?.cancel()
         aiCommandCaptureTask?.cancel()
+        aiCommandCaptureCompletionGate.revokeAll()
         aiCommandCaptureTimeoutTask?.cancel()
         processingTask?.cancel()
         hotkeyManager?.stop()
@@ -2089,6 +2201,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             return
         }
         guard canStartRecordingOutsideSecureInput() else { return }
+        guard allowRecordingWhileSpeechLanguageReady() else { return }
 
         invalidateAICommandWebRetry(.pendingAndRunning)
         invalidateAICommandFailureDismissal()
@@ -2390,6 +2503,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         hud.flashBusy()
     }
 
+    @discardableResult
+    private func allowRecordingWhileSpeechLanguageReady() -> Bool {
+        guard !speechLanguagePreparationCoordinator.state.isPreparing,
+              !isApplyingLanguageProfile else {
+            hud.flashError(
+                message: uiText("音声モデルを準備しています。完了してからもう一度録音を開始してください。")
+            )
+            return false
+        }
+        return true
+    }
+
     /// 整形失敗をメニューバーで一時警告する（挿入自体は成功しているため塗りなしアイコン）。
     private func flashMenuBarWarning(seconds: Double = 8) {
         menuBarWarningTask?.cancel()
@@ -2522,14 +2647,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         case .starting:
             pendingNormalHold = false
             clearHandsFreeSendTriggerCandidate()
+            aiCommandCaptureCompletionGate.authorizeUserCancellation()
             aiCommandCaptureTask?.cancel()
             aiCommandCaptureTask = nil
-            aiCommandCaptureID = nil
             clearAICommandCaptureTimeout()
+            let prewarmCorrelationID = activeVoiceSession?.id.uuidString
+            transcriptionEngine.cancelPendingStart(streamID: activeVoiceSession?.id)
             activeVoiceSession?.cancel()
             recordingStartTask?.cancel()
             recordingStartTask = nil
             recordingStartTaskSessionID = nil
+            Task { [cleanupEngine] in
+                await cleanupEngine.cancelRecordingPrewarm(correlationID: prewarmCorrelationID)
+            }
             clearRecordingStartTimeout()
             activeVoiceSession = nil
             appState.setPhase(.idle)
@@ -2546,6 +2676,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         clearHandsFreeSendTriggerCandidate()
         clearRecordingStartTimeout(for: cancelledSession)
         cancelledSession?.cancel()
+        if let correlationID = cancelledSession?.id.uuidString {
+            Task { [cleanupEngine] in
+                await cleanupEngine.cancelRecordingPrewarm(correlationID: correlationID)
+            }
+        }
         autoStopTask?.cancel()
         autoStopTask = nil
         menuBarIconName = "mic"
@@ -2612,6 +2747,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func startRecording() {
         guard appState.phase == .idle else { return }
         guard canStartRecordingOutsideSecureInput() else { return }
+        guard allowRecordingWhileSpeechLanguageReady() else { return }
         invalidateAICommandWebRetry(.pendingAndRunning)
         invalidateAICommandFailureDismissal()
         appState.setPhase(.starting)
@@ -2633,6 +2769,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
               settings.setupProgress.isComplete,
               appState.phase == .idle else { return }
         guard canStartRecordingOutsideSecureInput() else { return }
+        guard allowRecordingWhileSpeechLanguageReady() else { return }
         guard ExternalCompatibilityFocusReturnPolicy.canResume(
             expectedProcessIdentifier: expectedFrontmostProcessIdentifier,
             currentProcessIdentifier: NSWorkspace.shared.frontmostApplication?.processIdentifier
@@ -2651,6 +2788,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             return
         }
         invalidateAICommandWebRetry(.pendingAndRunning)
+        invalidateClipboardCancellationRecovery(closeWindow: true)
+        aiCommandCaptureCompletionGate.revokeAll()
         invalidateAICommandFailureDismissal()
         appState.setPhase(.starting)
         // 新しい指示を始めた時点で前回の控えを捨てる。残すとメニューの
@@ -2696,14 +2835,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         }
 
         let captureID = UUID()
-        aiCommandCaptureID = captureID
+        let captureLease = aiCommandCaptureCompletionGate.begin(id: captureID)
         aiCommandCaptureTask?.cancel()
         clearAICommandCaptureTimeout()
         scheduleAICommandCaptureTimeout(for: captureID)
         aiCommandCaptureTask = Task {
             defer {
-                if self.aiCommandCaptureID == captureID {
-                    self.aiCommandCaptureID = nil
+                if self.aiCommandCaptureCompletionGate.activeCaptureID == captureID {
+                    self.aiCommandCaptureCompletionGate.finishIfCurrent(captureLease)
                     self.aiCommandCaptureTask = nil
                 }
                 self.clearAICommandCaptureTimeout(for: captureID)
@@ -2711,8 +2850,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             let capture = await selectedTextCapture.capture(
                 allowingExternalCompatibility: settingsStore.settings.externalAppCompatibilitySettings.enabled
             )
-            guard aiCommandCaptureID == captureID,
-                  appState.phase == .starting,
+            switch aiCommandCaptureCompletionGate.classify(
+                capture,
+                lease: captureLease,
+                appIsIdle: appState.phase == .idle
+            ) {
+            case .recovery(let receipt):
+                presentClipboardCancellationRecovery(receipt)
+                return
+            case .stale:
+                return
+            case .current:
+                break
+            }
+            guard appState.phase == .starting,
                   settingsStore.settings.aiCommandSettings.enabled,
                   settingsStore.settings.setupProgress.isComplete else {
                 if appState.phase == .starting {
@@ -2722,7 +2873,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 }
                 return
             }
-            aiCommandCaptureID = nil
+            aiCommandCaptureCompletionGate.finishIfCurrent(captureLease)
             aiCommandCaptureTask = nil
             clearAICommandCaptureTimeout(for: captureID)
             switch capture {
@@ -2757,7 +2908,110 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
                 ))
             case .unavailable(let failure):
                 presentAICommandCaptureGuidance(for: failure, inputSource: inputSource)
+            case .cancelledTemporaryCopy(let receipt):
+                receipt.invalidate()
             }
+        }
+    }
+
+    private func presentClipboardCancellationRecovery(_ receipt: ClipboardCancellationReceipt) {
+        invalidateClipboardCancellationRecovery(closeWindow: true)
+        guard receipt.isUsable(), appState.phase == .idle else {
+            receipt.invalidate()
+            return
+        }
+        pendingClipboardCancellationReceipt = receipt
+        let payload = AICommandResultPayload(
+            spokenInstruction: "",
+            selectedText: nil,
+            answer: uiText("選択取得を中断したため、コピー前のクリップボードへ戻すか選べます。内容は表示・保存しません。"),
+            sources: [],
+            title: "クリップボードの復旧",
+            showsCopyButton: false,
+            actions: [
+                AICommandResultAction(
+                    id: "restore_clipboard",
+                    title: "コピー前の状態へ戻す",
+                    style: .primary,
+                    handler: { [weak self, weak receipt] in
+                        guard let receipt else { return }
+                        self?.resolveClipboardCancellationRecovery(receipt, restoreOriginal: true)
+                    }
+                ),
+                AICommandResultAction(
+                    id: "preserve_clipboard",
+                    title: "現在の状態を保持",
+                    style: .secondary,
+                    handler: { [weak self, weak receipt] in
+                        guard let receipt else { return }
+                        self?.resolveClipboardCancellationRecovery(receipt, restoreOriginal: false)
+                    }
+                ),
+            ],
+            presentation: .nonactivatingConfirmation,
+            onDismiss: { [weak self, weak receipt] in
+                guard let receipt else { return }
+                self?.discardClipboardCancellationRecovery(receipt)
+            }
+        )
+        pendingClipboardCancellationWindowID = payload.id
+        pendingClipboardCancellationExpiryTask = Task { @MainActor [weak self, weak receipt] in
+            do {
+                try await Task.sleep(nanoseconds: UInt64(ClipboardCancellationReceipt.lifetimeSeconds * 1_000_000_000))
+            } catch {
+                return
+            }
+            guard let self, let receipt, self.pendingClipboardCancellationReceipt === receipt else { return }
+            self.invalidateClipboardCancellationRecovery(closeWindow: true)
+        }
+        aiCommandResultWindows.show(payload)
+    }
+
+    private func resolveClipboardCancellationRecovery(
+        _ receipt: ClipboardCancellationReceipt,
+        restoreOriginal: Bool
+    ) {
+        guard pendingClipboardCancellationReceipt === receipt else { return }
+        let resolution = receipt.resolve(restoreOriginal: restoreOriginal)
+        pendingClipboardCancellationReceipt = nil
+        pendingClipboardCancellationWindowID = nil
+        pendingClipboardCancellationExpiryTask?.cancel()
+        pendingClipboardCancellationExpiryTask = nil
+        guard resolution == .clipboardChanged || resolution == .restoreFailed else { return }
+        let message: String
+        if resolution == .clipboardChanged {
+            message = uiText("クリップボードがその後変更されたため、上書きせず現在の状態を保持しました。")
+        } else {
+            message = uiText("コピー前の状態へ戻せたことを確認できませんでした。クリップボードの内容を確認してください。")
+        }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.aiCommandResultWindows.show(AICommandResultPayload(
+                spokenInstruction: "",
+                selectedText: nil,
+                answer: message,
+                sources: [],
+                title: "クリップボードの復旧",
+                showsCopyButton: false,
+                presentation: .nonactivatingConfirmation
+            ))
+        }
+    }
+
+    private func discardClipboardCancellationRecovery(_ receipt: ClipboardCancellationReceipt) {
+        guard pendingClipboardCancellationReceipt === receipt else { return }
+        invalidateClipboardCancellationRecovery(closeWindow: false)
+    }
+
+    private func invalidateClipboardCancellationRecovery(closeWindow: Bool) {
+        let windowID = pendingClipboardCancellationWindowID
+        pendingClipboardCancellationReceipt?.invalidate()
+        pendingClipboardCancellationReceipt = nil
+        pendingClipboardCancellationWindowID = nil
+        pendingClipboardCancellationExpiryTask?.cancel()
+        pendingClipboardCancellationExpiryTask = nil
+        if closeWindow, let windowID {
+            aiCommandResultWindows.dismiss(id: windowID)
         }
     }
 
@@ -2774,6 +3028,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
               settings.setupProgress.isComplete,
               appState.phase == .idle else { return }
         guard canStartRecordingOutsideSecureInput() else { return }
+        guard allowRecordingWhileSpeechLanguageReady() else { return }
         invalidateAICommandWebRetry(.pendingAndRunning)
         invalidateAICommandFailureDismissal()
         appState.setPhase(.starting)
@@ -2792,12 +3047,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             try? await Task.sleep(nanoseconds: 12_000_000_000)
             guard !Task.isCancelled,
                   let self,
-                  self.aiCommandCaptureID == captureID,
+                  self.aiCommandCaptureCompletionGate.activeCaptureID == captureID,
                   self.appState.phase == .starting else { return }
             AppLog.shared.warn("AIに指示の選択取得が12秒以内に完了しなかったため中断します")
             self.aiCommandCaptureTask?.cancel()
+            self.aiCommandCaptureCompletionGate.revokeActive(id: captureID)
             self.aiCommandCaptureTask = nil
-            self.aiCommandCaptureID = nil
             self.appState.setPhase(.error(self.uiText("選択テキストの取得がタイムアウトしました")))
             self.hud.flashError()
             self.scheduleHUDHideAfterError()
@@ -2807,7 +3062,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
     private func clearAICommandCaptureTimeout(for captureID: UUID? = nil) {
         if let captureID,
-           let activeCaptureID = aiCommandCaptureID,
+           let activeCaptureID = aiCommandCaptureCompletionGate.activeCaptureID,
            activeCaptureID != captureID {
             return
         }
@@ -2816,6 +3071,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func beginRecording(session: VoiceSession) {
+        guard allowRecordingWhileSpeechLanguageReady() else {
+            session.cancel()
+            activeVoiceSession = nil
+            appState.setPhase(.idle)
+            hud.clearAICommandState()
+            hud.clearHandsFreeSendState()
+            return
+        }
         recordingStartTask?.cancel()
         clearRecordingStartTimeout()
         activeVoiceSession = session
@@ -2823,6 +3086,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         scheduleRecordingStartTimeout(for: session)
         let recordingRequestedAt = Date()
         AppLog.shared.info("[Telemetry] recording_requested session=\(session.id.uuidString) mode=\(session.mode.rawValue)")
+
+        // 期限切れが近い整形threadは、発話中の裏で作り直しておく。
+        // 実機ログでは全整形の28%が「作り直し直後の1回目」に当たり、その中央値は5.2秒
+        // （2回目以降は2.4秒）。録音長はp25=3.8秒・p50=7.5秒あるので、0.4秒の
+        // `thread/start` は発話中に隠しきれる。
+        //
+        // **`recordingStartTask` の中に入れない。** あの中はウォームアップとマイク権限を
+        // awaitするため、先回りの意味が薄れる。
+        // correlationIDに `session.id` を使うのは、cleanup側（`continueNormalPipeline`）が
+        // 同じ値を渡しており、ログ上で先回りと整形を突き合わせられるようにするため。
+        if RecordingStartPrewarmPolicy.shouldPrewarm(
+            mode: session.mode,
+            cleanupEnabled: settingsStore.settings.cleanupEnabled,
+            codexStatus: codexStatus
+        ) {
+            let promptLanguage = settingsStore.settings.languagePreferences.sttLanguage
+            let correlationID = session.id.uuidString
+            Task { [cleanupEngine] in
+                await cleanupEngine.prepareThreadForRecording(
+                    promptLanguage: promptLanguage,
+                    correlationID: correlationID
+                )
+            }
+        }
 
         recordingStartTask = Task {
             defer {
@@ -2983,10 +3270,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     private func finishStartingSessionWithError(_ session: VoiceSession, message: String) {
         guard activeVoiceSession?.id == session.id else { return }
         session.cancel()
+        transcriptionEngine.cancelPendingStart(streamID: session.id)
         if recordingStartTaskSessionID == session.id {
             recordingStartTask?.cancel()
             recordingStartTask = nil
             recordingStartTaskSessionID = nil
+        }
+        let prewarmCorrelationID = session.id.uuidString
+        Task { [cleanupEngine] in
+            await cleanupEngine.cancelRecordingPrewarm(correlationID: prewarmCorrelationID)
         }
         clearRecordingStartTimeout(for: session)
         clearPendingNormalHoldState()
@@ -3795,7 +4087,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             reasoningEffort: effort,
             inputSource: inputSource
         )
-        inputHistoryStore.append(entry, retentionDays: settings.historyRetentionDays)
+        if inputHistoryStore.append(entry, retentionDays: settings.historyRetentionDays) != .saved {
+            noteHistoryStorageFailure()
+        }
     }
 
     /// 結果window、設定変更、録音開始、Secure Input、非アクティブ化の全経路で呼ぶ。
@@ -4820,7 +5114,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             latencyMs: cleanupLatencyMs
         )
 
-        inputHistoryStore.append(entry, retentionDays: historyRetentionDays)
+        if inputHistoryStore.append(entry, retentionDays: historyRetentionDays) != .saved {
+            noteHistoryStorageFailure()
+        }
+    }
+
+    func clearHistoryStorageNoticeIfRecovered() {
+        guard !personalDictionaryStore.requiresRecovery else { return }
+        switch inputHistoryStore.loadStatus {
+        case .missing, .ready: storageNotice = nil
+        case .malformed, .unreadable: break
+        }
+    }
+
+    private func noteHistoryStorageFailure() {
+        guard !personalDictionaryStore.requiresRecovery else { return }
+        storageNotice = "履歴を保存または整理できませんでした。音声入力の結果は取り消していません。設定の履歴を確認してください。"
     }
 
     private func logNormalInputCompletion(

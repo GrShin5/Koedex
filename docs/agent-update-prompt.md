@@ -28,7 +28,7 @@ verification used for a new installation.
 ## Pinned source
 
 This version pins the official URL `https://github.com/GrShin5/Koedex.git`, release tag
-`v0.1.8`, and GitHub immutable-release verification.
+`v0.1.9`, and GitHub immutable-release verification.
 
 ## Recommended models (as of 2026-08-24)
 
@@ -69,7 +69,7 @@ use docs/agent-install-prompt.md instead.
 
 PINNED SOURCE
 - Official URL: https://github.com/GrShin5/Koedex.git
-- Release tag: v0.1.8
+- Release tag: v0.1.9
 - Verification method: GitHub immutable release
 
 WORKING LOCATION
@@ -101,15 +101,15 @@ STEP 1: SET ASIDE THE CURRENT INSTALL
    An equivalent Finder drag is fine too, but never delete or trash it.
 
 STEP 2: FETCH AND VERIFY THE NEW VERSION
-1. Clone v0.1.8 into the new destination using a command equivalent to:
-   git clone --branch v0.1.8 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
+1. Clone v0.1.9 into the new destination using a command equivalent to:
+   git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
 2. Before running any repository script, verify all of the following:
    - origin's fetch URL matches https://github.com/GrShin5/Koedex.git
      (you may treat only a trailing .git as equivalent during comparison)
-   - the local v0.1.8 tag's commit exactly equals HEAD
-   - refs/tags/v0.1.8 returned by git ls-remote against the official URL exactly equals HEAD
-   - GitHub's official releases/tags/v0.1.8 API reports tag_name=v0.1.8 and immutable=true
-   - if GitHub CLI is already available, gh release verify v0.1.8 --repo GrShin5/Koedex also succeeds
+   - the local v0.1.9 tag's commit exactly equals HEAD
+   - refs/tags/v0.1.9 returned by git ls-remote against the official URL exactly equals HEAD
+   - GitHub's official releases/tags/v0.1.9 API reports tag_name=v0.1.9 and immutable=true
+   - if GitHub CLI is already available, gh release verify v0.1.9 --repo GrShin5/Koedex also succeeds
    - the checkout is clean and has no untracked files
 3. If any value differs, the release is missing or not immutable, or a value cannot be
    verified, do not run a repository script. Report the values you could verify in a table
@@ -214,7 +214,7 @@ Codeへ更新作業をまとめて依頼するためのものです。下のプ�
 | 項目 | 固定値 |
 | --- | --- |
 | 公式URL | `https://github.com/GrShin5/Koedex.git` |
-| リリースタグ | `v0.1.8` |
+| リリースタグ | `v0.1.9` |
 | 検証方式 | `GitHub immutable release` |
 
 ## 推奨モデル（2026-08-24時点）
@@ -258,7 +258,7 @@ KoedexというmacOSアプリを、公式GitHubリポジトリの新しいリリ
 
 【固定する取得元】
 - 公式URL: https://github.com/GrShin5/Koedex.git
-- リリースタグ: v0.1.8
+- リリースタグ: v0.1.9
 - 検証方式: GitHub immutable release
 
 【作業場所】
@@ -290,15 +290,15 @@ KoedexというmacOSアプリを、公式GitHubリポジトリの新しいリリ
    しないでください。
 
 【手順2：新しいバージョンの取得と照合】
-1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.8をcloneしてください。
-   git clone --branch v0.1.8 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
+1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.9をcloneしてください。
+   git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
 2. clone直後、スクリプトを1つも実行する前に、次をすべて確認してください。
    - originのfetch URLが https://github.com/GrShin5/Koedex.git と一致する
      （比較時だけ末尾の.gitの有無を同一視して構いません）
-   - ローカルのv0.1.8 tagが指すcommitとHEADが完全一致する
-   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.8もHEADと完全一致する
-   - GitHub公式APIのreleases/tags/v0.1.8が、tag_name=v0.1.8かつimmutable=trueを返す
-   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.8 --repo GrShin5/Koedexも成功する
+   - ローカルのv0.1.9 tagが指すcommitとHEADが完全一致する
+   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.9もHEADと完全一致する
+   - GitHub公式APIのreleases/tags/v0.1.9が、tag_name=v0.1.9かつimmutable=trueを返す
+   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.9 --repo GrShin5/Koedexも成功する
    - checkoutがcleanで、未追跡ファイルもない
 3. 1つでも一致しない、releaseが存在しない・immutableでない、取得結果を確認できない、
    別refへ誘導された場合は、リポジトリ内のスクリプトを実行せず、確認できた値を表で

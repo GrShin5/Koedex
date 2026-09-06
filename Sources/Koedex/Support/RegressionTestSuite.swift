@@ -21,7 +21,7 @@ enum RegressionTestSuite {
     /// - Parameter maxSkips: SKIPをここまで許す。超えたらFAILが0件でも失敗として返す。
     ///   nilならSKIPは終了コードに影響しない。CIは想定内のSKIP件数を渡し、
     ///   **新しくSKIPされ始めた検証だけ**を失敗として拾う。
-    static func run(maxSkips: Int? = nil) -> Int32 {
+    static func run(maxSkips: Int? = nil) async -> Int32 {
         var failures: [String] = []
         var passedCount = 0
         var skipped: [String] = []
@@ -160,6 +160,92 @@ enum RegressionTestSuite {
                 && defaultAppServerArguments.contains("plugins={}")
                 && defaultAppServerArguments.contains("web_search=\"disabled\""),
             "external CLI app-server safeguards remain enabled"
+        )
+
+        // CodexChildEnvironmentPolicy: 子プロセス環境のallow-list境界。
+        // ProcessInfoではなく合成した親環境を使い、資格情報キーが混入していないことを固定する。
+        // All credential-shaped keys below use this synthetic, non-secret test value.
+        let dummyValue = "CLI0_SECRET_SENTINEL"
+        let envPolicyAllowedParent: [String: String] = [
+            "HOME": "sentinel-home",
+            "PATH": "/custom/bin",
+            "USER": "sentinel-user",
+            "LOGNAME": "sentinel-logname",
+            "TMPDIR": "sentinel-tmpdir",
+            "LANG": "en_US.UTF-8",
+            "LC_MESSAGES": "en_US.UTF-8",
+            "CODEX_HOME": "sentinel-codex-home",
+            "HTTPS_PROXY": "https://proxy.example:8080",
+            "SSL_CERT_FILE": "sentinel-cert-file",
+            "NODE_EXTRA_CA_CERTS": "sentinel-ca-certs",
+            "NPM_CONFIG_PREFIX": "sentinel-npm-prefix",
+        ]
+        let envPolicyDisallowedParent: [String: String] = [
+            "OPENAI_API_KEY": dummyValue,
+            "CODEX_API_KEY": dummyValue,
+            "CODEX_ACCESS_TOKEN": dummyValue,
+            "GITHUB_TOKEN": dummyValue,
+            "AWS_SECRET_ACCESS_KEY": dummyValue,
+            "MY_SERVICE_PASSWORD": dummyValue,
+            "SSH_AUTH_SOCK": "sentinel-ssh-auth-sock",
+            "NODE_OPTIONS": "sentinel-node-options",
+            "DYLD_INSERT_LIBRARIES": "sentinel-dyld",
+            "SHELL": "/bin/zsh",
+        ]
+        let envPolicyParent = envPolicyAllowedParent.merging(envPolicyDisallowedParent) { current, _ in current }
+        let envPolicyToolDirectories = ["/tool/dir/a", "/tool/dir/b"]
+
+        let envPolicyEnforced = CodexChildEnvironmentPolicy.prepare(
+            parent: envPolicyParent, mode: .enforce, toolDirectories: envPolicyToolDirectories
+        )
+        expect(
+            envPolicyAllowedParent.keys.allSatisfy { envPolicyEnforced.environment[$0] != nil }
+                && envPolicyDisallowedParent.keys.allSatisfy { envPolicyEnforced.environment[$0] == nil }
+                && envPolicyEnforced.droppedCount == 10,
+            "enforce mode keeps only allow-listed child environment keys and drops every credential-shaped key"
+        )
+        let envPolicyEnforcedPath = (envPolicyEnforced.environment["PATH"] ?? "").split(separator: ":").map(String.init)
+        expect(
+            Array(envPolicyEnforcedPath.prefix(envPolicyToolDirectories.count)) == envPolicyToolDirectories
+                && envPolicyEnforcedPath.contains("/custom/bin")
+                && Array(envPolicyEnforcedPath.suffix(4)) == ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+                && Set(envPolicyEnforcedPath).count == envPolicyEnforcedPath.count,
+            "enforce mode PATH keeps tool directories first, preserves custom PATH entries, and ends with base paths without duplicates"
+        )
+
+        let envPolicyObserved = CodexChildEnvironmentPolicy.prepare(
+            parent: envPolicyParent, mode: .observe, toolDirectories: envPolicyToolDirectories
+        )
+        expect(
+            envPolicyObserved.environment["OPENAI_API_KEY"] == dummyValue
+                && envPolicyObserved.droppedCount == 10,
+            "observe mode keeps forwarding the full parent environment unchanged while still counting what enforce would drop"
+        )
+
+        let envPolicyPassedThrough = CodexChildEnvironmentPolicy.prepare(
+            parent: envPolicyParent, mode: .passthrough, toolDirectories: envPolicyToolDirectories
+        )
+        expect(
+            envPolicyPassedThrough.environment["SSH_AUTH_SOCK"] != nil
+                && envPolicyPassedThrough.droppedCount == 0,
+            "passthrough mode is a full opt-out bypass that forwards everything and reports nothing dropped"
+        )
+
+        expect(
+            CodexChildEnvironmentPolicy.mode(passthroughFlag: "1") == .passthrough
+                && CodexChildEnvironmentPolicy.mode(passthroughFlag: nil) == CodexChildEnvironmentPolicy.defaultMode
+                && CodexChildEnvironmentPolicy.mode(passthroughFlag: "0") == CodexChildEnvironmentPolicy.defaultMode,
+            "child environment passthrough only activates on an explicit \"1\" flag value"
+        )
+
+        // summaryはbug報告に貼られる想定のため、allow-listされた名前だけを含み、
+        // 値や落とした変数名（雇用主・利用サービスの推測材料になり得る）を絶対に含まない。
+        let envPolicyEnforcedSummary = CodexChildEnvironmentPolicy.summary(envPolicyEnforced)
+        expect(
+            !envPolicyEnforcedSummary.contains(dummyValue)
+                && !envPolicyEnforcedSummary.contains("/custom/bin")
+                && !envPolicyEnforcedSummary.contains("GITHUB_TOKEN"),
+            "child environment summary never leaks values, PATH entries, or dropped variable names"
         )
 
         let ephemeralParameters = EphemeralThreadStartPolicy.parameters(from: [
@@ -1708,6 +1794,69 @@ enum RegressionTestSuite {
                 && CleanupThreadRotationPolicy.maximumTurnsPerThread == 12
                 && CleanupThreadRotationPolicy.maximumThreadAgeSeconds == 600,
             "cleanup thread rotation triggers on turn count or thread age and never on a missing timestamp alone"
+        )
+        expect(
+            // 録音開始時だけ先読み分を足す。整形時の閾値(600秒)が動いていないことも同時に固定する。
+            !CleanupThreadRotationPolicy.shouldRotateBeforeRecording(turnCount: 11, threadAgeSeconds: 569)
+                && CleanupThreadRotationPolicy.shouldRotateBeforeRecording(turnCount: 0, threadAgeSeconds: 570)
+                && CleanupThreadRotationPolicy.shouldRotateBeforeRecording(turnCount: 12, threadAgeSeconds: 0)
+                && !CleanupThreadRotationPolicy.shouldRotateBeforeRecording(turnCount: 0, threadAgeSeconds: nil)
+                && CleanupThreadRotationPolicy.recordingLeadTimeSeconds == 30
+                && !CleanupThreadRotationPolicy.shouldRotate(turnCount: 0, threadAgeSeconds: 599),
+            "recording-start rotation looks ahead by the lead time and leaves the cleanup-time threshold untouched"
+        )
+        expect(
+            // 先回りは「thread無し・言語違い・まもなく期限切れ」だけに触れる。
+            // 実行中turnとsingle-use latchでは必ず降りる。
+            CleanupThreadPrewarmPolicy.decision(
+                requiresSingleUseThreads: true, hasActiveTurn: false, hasThread: false,
+                threadPromptLanguage: nil, promptLanguage: .japanese,
+                turnCount: 0, threadAgeSeconds: nil) == .skip
+                && CleanupThreadPrewarmPolicy.decision(
+                    requiresSingleUseThreads: false, hasActiveTurn: true, hasThread: true,
+                    threadPromptLanguage: .japanese, promptLanguage: .japanese,
+                    turnCount: 12, threadAgeSeconds: 9_999) == .skip
+                && CleanupThreadPrewarmPolicy.decision(
+                    requiresSingleUseThreads: false, hasActiveTurn: false, hasThread: false,
+                    threadPromptLanguage: nil, promptLanguage: .japanese,
+                    turnCount: 0, threadAgeSeconds: nil) == .createThread
+                && CleanupThreadPrewarmPolicy.decision(
+                    requiresSingleUseThreads: false, hasActiveTurn: false, hasThread: true,
+                    threadPromptLanguage: .japanese, promptLanguage: .english,
+                    turnCount: 0, threadAgeSeconds: 1) == .replaceThread
+                && CleanupThreadPrewarmPolicy.decision(
+                    requiresSingleUseThreads: false, hasActiveTurn: false, hasThread: true,
+                    threadPromptLanguage: .japanese, promptLanguage: .japanese,
+                    turnCount: 12, threadAgeSeconds: 0) == .replaceThread
+                && CleanupThreadPrewarmPolicy.decision(
+                    requiresSingleUseThreads: false, hasActiveTurn: false, hasThread: true,
+                    threadPromptLanguage: .japanese, promptLanguage: .japanese,
+                    turnCount: 0, threadAgeSeconds: 570) == .replaceThread
+                && CleanupThreadPrewarmPolicy.decision(
+                    requiresSingleUseThreads: false, hasActiveTurn: false, hasThread: true,
+                    threadPromptLanguage: .japanese, promptLanguage: .japanese,
+                    turnCount: 11, threadAgeSeconds: 569) == .skip
+                && CleanupThreadPrewarmPolicy.decision(
+                    requiresSingleUseThreads: false, hasActiveTurn: false, hasThread: true,
+                    threadPromptLanguage: .japanese, promptLanguage: .japanese,
+                    turnCount: 0, threadAgeSeconds: nil) == .skip,
+            "recording-start prewarm only touches a missing, wrong-language, or about-to-expire idle thread"
+        )
+        expect(
+            // 通常入力・cleanup有効・接続済みのときだけ先回りする。
+            RecordingStartPrewarmPolicy.shouldPrewarm(
+                mode: .voiceInput, cleanupEnabled: true, codexStatus: .connected)
+                && !RecordingStartPrewarmPolicy.shouldPrewarm(
+                    mode: .aiCommand, cleanupEnabled: true, codexStatus: .connected)
+                && !RecordingStartPrewarmPolicy.shouldPrewarm(
+                    mode: .voiceInput, cleanupEnabled: false, codexStatus: .connected)
+                && !RecordingStartPrewarmPolicy.shouldPrewarm(
+                    mode: .voiceInput, cleanupEnabled: true, codexStatus: .checking)
+                && !RecordingStartPrewarmPolicy.shouldPrewarm(
+                    mode: .voiceInput, cleanupEnabled: true, codexStatus: .failed("boom"))
+                && !RecordingStartPrewarmPolicy.shouldPrewarm(
+                    mode: .voiceInput, cleanupEnabled: true, codexStatus: .unknown),
+            "recording-start prewarm runs only for voice input with cleanup on and a connected codex"
         )
         expect(
             // 録音中・処理中・再接続中は押せず、待機中とエラー表示中だけ押せる。
@@ -5201,6 +5350,9 @@ enum RegressionTestSuite {
         defer { try? FileManager.default.removeItem(at: storageRootURL) }
 
         try? FileManager.default.createDirectory(at: storageRootURL, withIntermediateDirectories: true)
+        for outcome in StorageRegressionTests.run(storageRootURL: storageRootURL) {
+            expect(outcome.passed, outcome.name)
+        }
         let legacySettings: [String: Any] = [
             "schemaVersion": 8,
             "customInstruction": "既存の指示を保持",
@@ -6964,6 +7116,9 @@ enum RegressionTestSuite {
             "a trigger-phrase-only utterance still resolves to send-key-only with no text inserted"
         )
 
+        for result in await AsyncRegressionTests.run() {
+            expect(result.passed, result.name)
+        }
         return finish()
     }
 

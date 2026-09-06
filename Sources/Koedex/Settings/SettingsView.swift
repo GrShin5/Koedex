@@ -305,6 +305,7 @@ struct SettingsView: View {
     @State private var historyDeletionRequest: HistoryDeletionRequest?
     @State private var historyDeleteTarget: UUID?
     @State private var historySearchText = ""
+    @State private var historyOperationMessage: String?
     @State private var pendingHistoryRetentionChange: HistoryRetentionChangeRequest?
     @State private var hoveredHistoryCopyID: UUID?
     @State private var copiedHistoryEntryID: UUID?
@@ -454,6 +455,12 @@ struct SettingsView: View {
         .onReceive(appState.$phase.removeDuplicates()) { phase in
             observedPipelinePhase = phase
         }
+        .onReceive(NotificationCenter.default.publisher(for: .koedexOpenDictionaryRecovery)) { _ in
+            selectedTab = .userDictionary
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .koedexOpenHistoryStorage)) { _ in
+            selectedTab = .history
+        }
         .onChange(of: hotkeyDerivedStateKey) {
             refreshHotkeyDerivedState()
         }
@@ -507,8 +514,9 @@ struct SettingsView: View {
                 metrics: popupMetrics,
                 onConfirm: {
                     if let id = historyDeleteTarget {
-                        historyStore.delete(id: id)
-                        selectedHistoryIDs.remove(id)
+                        let result = historyStore.delete(id: id)
+                        if result == .saved { selectedHistoryIDs.remove(id) }
+                        showHistoryMutationResult(result)
                     }
                     historyDeleteTarget = nil
                 },
@@ -1764,6 +1772,25 @@ struct SettingsView: View {
                 .bold()
                 .textSelection(.enabled)
 
+            if historyNeedsAttention {
+                VStack(alignment: .leading, spacing: uiMetrics.layout(8)) {
+                    Text(uiText("履歴ファイルの一部を安全に読み込めませんでした。元の行を残すため、編集・削除・保持期間による整理を停止しています。新しい履歴の追記は続けられます。"))
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .textSelection(.enabled)
+                    Button(uiText("履歴を再読み込み")) {
+                        historyStore.load()
+                        historyOperationMessage = historyNeedsAttention ? uiText("まだ履歴を安全に読み込めません。ファイルを確認してから再試行してください。") : nil
+                        if !historyNeedsAttention { appDelegate.clearHistoryStorageNoticeIfRecovered() }
+                    }
+                }
+                .padding(uiMetrics.layout(10))
+                .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: uiMetrics.layout(6)))
+            }
+            if let historyOperationMessage {
+                Text(historyOperationMessage).font(uiMetrics.font(.caption)).foregroundStyle(.red).textSelection(.enabled)
+            }
+
             settingsSection {
                 sectionTitle("履歴の保持")
                 Text(uiText("デバイスに履歴をどのくらい保持したいですか？"))
@@ -1849,7 +1876,7 @@ struct SettingsView: View {
             Button(uiText("履歴をすべて削除"), role: .destructive) {
                 requestDeleteAllHistory()
             }
-            .disabled(historyStore.entries.isEmpty)
+            .disabled(historyStore.entries.isEmpty || historyNeedsAttention)
 
             helperText("「履歴をすべて削除」は、履歴に表示される保存済み本文と、履歴には表示されないメタデータをすべて削除します。AIアシストを使用しない文字起こし、AIアシストに失敗した場合などは履歴には表示されませんが、Koedexの音声入力を使用した日時や使用モデル情報などが、このMacにメタデータとして残る可能性があります。")
         }
@@ -1935,6 +1962,7 @@ struct SettingsView: View {
                     Button(uiText("削除"), role: .destructive) {
                         historyDeleteTarget = entry.id
                     }
+                    .disabled(historyNeedsAttention)
                 }
             }
 
@@ -2539,7 +2567,7 @@ struct SettingsView: View {
             store.settings.aiCommandSettings.historyRetentionDays = option.retentionDays
         }
         if option.isSavingEnabled, option.retentionDays > 0 {
-            historyStore.prune(mode: scope.historyMode, retentionDays: option.retentionDays)
+            showHistoryMutationResult(historyStore.prune(mode: scope.historyMode, retentionDays: option.retentionDays))
         }
     }
 
@@ -2576,18 +2604,35 @@ struct SettingsView: View {
     private func performHistoryDeletion() {
         guard let request = historyDeletionRequest else { return }
 
+        let result: InputHistoryStore.MutationResult
         switch request.kind {
         case .all:
-            historyStore.delete(ids: request.targetIDs)
-            selectedHistoryIDs.removeAll()
+            result = historyStore.delete(ids: request.targetIDs)
+            if result == .saved { selectedHistoryIDs.removeAll() }
         case .selected, .unselectedDisplayed:
-            historyStore.delete(ids: request.targetIDs)
-            selectedHistoryIDs.subtract(request.targetIDs)
+            result = historyStore.delete(ids: request.targetIDs)
+            if result == .saved { selectedHistoryIDs.subtract(request.targetIDs) }
         case .metadataOnly:
-            historyStore.delete(ids: request.targetIDs)
+            result = historyStore.delete(ids: request.targetIDs)
         }
+        if result == .saved { historyDeletionRequest = nil }
+        showHistoryMutationResult(result)
+    }
 
-        historyDeletionRequest = nil
+    private var historyNeedsAttention: Bool {
+        switch historyStore.loadStatus { case .missing, .ready: return false; case .malformed, .unreadable: return true }
+    }
+
+    private func showHistoryMutationResult(_ result: InputHistoryStore.MutationResult) {
+        switch result {
+        case .saved: historyOperationMessage = nil
+        case .savedWithCleanupWarning:
+            historyOperationMessage = uiText("新しい履歴は保存しましたが、古い履歴を整理できませんでした。履歴ファイルを確認してください。")
+        case .blockedByMalformedHistory:
+            historyOperationMessage = uiText("読み込めない履歴行を保護するため、この操作を実行しませんでした。履歴を再読み込みしてから試してください。")
+        case .failed:
+            historyOperationMessage = uiText("履歴の変更を保存できませんでした。画面上の履歴は変更していません。もう一度試してください。")
+        }
     }
 
     private var historyRetentionConfirmationMessage: String {

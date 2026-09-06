@@ -339,6 +339,22 @@ final class AICommandExecutionTimingRecorder: @unchecked Sendable {
     }
 }
 
+private final class AICommandExecutionCancellationSignal: @unchecked Sendable {
+    let stream: AsyncStream<Void>
+    private let continuation: AsyncStream<Void>.Continuation
+
+    init() {
+        let pair = AsyncStream<Void>.makeStream()
+        stream = pair.stream
+        continuation = pair.continuation
+    }
+
+    func cancel() {
+        continuation.yield(())
+        continuation.finish()
+    }
+}
+
 struct AICommandWebExecutionPolicy: Equatable {
     let webIntentRequested: Bool
     let usesWebClient: Bool
@@ -575,6 +591,22 @@ actor AICommandEngine {
         let disposition: String
     }
 
+    private enum ExecutionPhase {
+        case preparingThread
+        case startingTurn(threadID: String)
+        case active(threadID: String, turnID: String, timing: AICommandExecutionTimingRecorder)
+    }
+
+    private struct ExecutionLease {
+        let id: UUID
+        let cancellationEpoch: Int
+        let state: ClientState
+        let webEnabled: Bool
+        var phase: ExecutionPhase
+        let cancellationSignal: AICommandExecutionCancellationSignal
+        var cancellationTask: Task<Void, Never>?
+    }
+
     private enum ConfigurationError: LocalizedError {
         case turnInProgress
 
@@ -610,9 +642,26 @@ actor AICommandEngine {
     /// activeTurnがnilの試行間でも取消を観測できるよう、execute単位のepochを持つ。
     private var cancellationEpoch = 0
     private let workingDirectory: String
+    private var executionLease: ExecutionLease?
+    private let lifecycleClientFactory: (@Sendable (Bool, CodexModelSettings) -> CodexAppServerClient)?
 
-    init(executablePath: String? = nil) {
+    init(
+        executablePath: String? = nil,
+        lifecycleWorkingDirectory: String? = nil,
+        lifecycleAvailableModels: [CodexModelInfo]? = nil,
+        lifecycleClientFactory: (@Sendable (Bool, CodexModelSettings) -> CodexAppServerClient)? = nil
+    ) {
         self.executablePath = executablePath
+        self.lifecycleClientFactory = lifecycleClientFactory
+        self.availableModels = lifecycleAvailableModels
+        if lifecycleAvailableModels != nil {
+            self.availableModelsUsedBundledCatalog = false
+            self.modelsFetchedAt = Date()
+        }
+        if let lifecycleWorkingDirectory {
+            self.workingDirectory = lifecycleWorkingDirectory
+            return
+        }
         let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let root = OnboardingRuntimeProfile.storageRootURL
             ?? appSupport.appendingPathComponent("Koedex", isDirectory: true)
@@ -725,20 +774,8 @@ actor AICommandEngine {
 
     func cancelActive() async {
         cancellationEpoch &+= 1
-        guard let activeTurn else { return }
-        activeTurn.timing.recordInterruptRequested()
-        do {
-            _ = try await activeTurn.client.sendRequest(
-                "turn/interrupt",
-                params: ["threadId": activeTurn.threadID, "turnId": activeTurn.turnID],
-                timeoutSeconds: 5
-            )
-            activeTurn.timing.recordInterruptCompleted(succeeded: true)
-        } catch {
-            // 取消の既存挙動（失敗しても次のUI操作を塞がない）は維持し、計測だけ残す。
-            activeTurn.timing.recordInterruptCompleted(succeeded: false)
-        }
-        self.activeTurn = nil
+        guard let executionLease else { return }
+        await enforceCancellation(for: executionLease.id)
     }
 
     func execute(
@@ -750,6 +787,7 @@ actor AICommandEngine {
             throw AICommandError.underlying(ConfigurationError.turnInProgress)
         }
         isExecuting = true
+        let executionID = UUID()
         let executionCancellationEpoch = cancellationEpoch
         let webPolicy = Self.webExecutionPolicy(for: request, options: options)
         let usesWebClient = webPolicy.usesWebClient
@@ -819,6 +857,15 @@ actor AICommandEngine {
                     timeoutSeconds: max(0.1, min(20, Double(remainingMilliseconds) / 1_000))
                 )
                 let state = acquisition.state
+                let cancellationSignal = AICommandExecutionCancellationSignal()
+                executionLease = ExecutionLease(
+                    id: executionID,
+                    cancellationEpoch: executionCancellationEpoch,
+                    state: state,
+                    webEnabled: usesWebClient,
+                    phase: .preparingThread,
+                    cancellationSignal: cancellationSignal
+                )
                 timing.markClientReady(disposition: acquisition.disposition, generation: state.generation)
                 // client取得中に取消・設定変更・deadline到達が起きた場合、本文を持つ
                 // thread/startへ進まない。二回目にも新しい90/60秒は与えない。
@@ -851,6 +898,11 @@ actor AICommandEngine {
                         throw AICommandError.underlying(CodexClientError.timeout)
                     }
                     let input = try makeInput(request, webPolicy: webPolicy)
+                    guard executionLease?.id == executionID,
+                          executionLease?.cancellationTask == nil else {
+                        throw CancellationError()
+                    }
+                    executionLease?.phase = .startingTurn(threadID: threadID)
                     var result = try await runTurn(
                         client: state.client,
                         clientGeneration: state.generation,
@@ -862,14 +914,24 @@ actor AICommandEngine {
                         onWebActivity: onWebActivity,
                         timing: timing,
                         turnTimeoutMs: remainingTurnMilliseconds,
-                        webAllowed: usesWebClient
+                        webAllowed: usesWebClient,
+                        executionID: executionID,
+                        executionCancellationEpoch: executionCancellationEpoch,
+                        cancellationSignal: cancellationSignal
                     )
+                    try Task.checkCancellation()
+                    guard cancellationEpoch == executionCancellationEpoch,
+                          executionLease?.id == executionID,
+                          executionLease?.cancellationTask == nil else {
+                        throw CancellationError()
+                    }
                     if options.forceShowResult {
                         result.outcome.destinationIntent = .showResult
                     }
                     completedAICommandCount += 1
                     let completionCount = completedAICommandCount
                     isExecuting = false
+                    if executionLease?.id == executionID { executionLease = nil }
                     await applyDeferredClientResetIfNeeded()
                     if let summary = timing.finish(
                         outcome: String(describing: result.outcome.kind),
@@ -912,6 +974,10 @@ actor AICommandEngine {
                 }
             }
         } catch {
+            if Task.isCancelled || cancellationEpoch != executionCancellationEpoch {
+                await enforceCancellation(for: executionID)
+            }
+            if executionLease?.id == executionID { executionLease = nil }
             isExecuting = false
             await applyDeferredClientResetIfNeeded()
             if let summary = timing.finish(
@@ -1035,12 +1101,12 @@ actor AICommandEngine {
         if !webEnabled, let noWebState {
             return ClientAcquisition(state: noWebState, disposition: "reused")
         }
-        let client = CodexAppServerClient(
-            executablePath: executablePath,
-            modelSettings: modelSettings,
-            webSearchMode: webEnabled ? .live : .disabled,
-            nativeToolsEnabled: false
-        )
+        let client = lifecycleClientFactory?(webEnabled, modelSettings) ?? CodexAppServerClient(
+                executablePath: executablePath,
+                modelSettings: modelSettings,
+                webSearchMode: webEnabled ? .live : .disabled,
+                nativeToolsEnabled: false
+            )
         try await client.start(timeoutSeconds: timeoutSeconds)
         let generation = nextClientGeneration
         nextClientGeneration += 1
@@ -1117,7 +1183,10 @@ actor AICommandEngine {
         onWebActivity: @MainActor @escaping (Bool) -> Void,
         timing: AICommandExecutionTimingRecorder,
         turnTimeoutMs: Int,
-        webAllowed: Bool
+        webAllowed: Bool,
+        executionID: UUID,
+        executionCancellationEpoch: Int,
+        cancellationSignal: AICommandExecutionCancellationSignal
     ) async throws -> AICommandResult {
         let methods = ["item/started", "item/completed", "turn/completed", "error"]
         let (subscriptionID, stream) = await client.subscribe(methods: methods)
@@ -1139,13 +1208,21 @@ actor AICommandEngine {
         let response = try await client.sendRequest(
             "turn/start",
             params: params,
-            timeoutSeconds: turnStartTimeoutSeconds
+            timeoutSeconds: turnStartTimeoutSeconds,
+            cancellationMode: .cancelWithTask
         )
         guard let turn = response["turn"] as? [String: Any], let turnID = turn["id"] as? String else {
             throw AICommandError.invalidResponse
         }
+        try Task.checkCancellation()
+        guard cancellationEpoch == executionCancellationEpoch,
+              executionLease?.id == executionID,
+              executionLease?.cancellationTask == nil else {
+            throw CancellationError()
+        }
         timing.markTurnStarted()
         activeTurn = (client, threadID, turnID, timing)
+        executionLease?.phase = .active(threadID: threadID, turnID: turnID, timing: timing)
 
         let timeout = UInt64(turnTimeoutMs) * 1_000_000
         let terminalTracker = AICommandTurnTerminalTracker()
@@ -1279,6 +1356,12 @@ actor AICommandEngine {
                     try await Task.sleep(nanoseconds: timeout)
                     throw AICommandError.underlying(CodexClientError.timeout)
                 }
+                group.addTask {
+                    for await _ in cancellationSignal.stream {
+                        throw CancellationError()
+                    }
+                    throw CancellationError()
+                }
                 defer { group.cancelAll() }
                 guard let result = try await group.next() else { throw AICommandError.emptyResponse }
                 return result
@@ -1286,7 +1369,9 @@ actor AICommandEngine {
             activeTurn = nil
             return result
         } catch {
-            if !terminalTracker.wasObserved {
+            if Task.isCancelled || cancellationEpoch != executionCancellationEpoch {
+                await enforceCancellation(for: executionID)
+            } else if !terminalTracker.wasObserved {
                 timing.recordInterruptRequested()
                 do {
                     _ = try await client.sendRequest(
@@ -1304,6 +1389,57 @@ actor AICommandEngine {
             throw error is AICommandError ? error : AICommandError.underlying(error)
         }
     }
+
+    private func enforceCancellation(for executionID: UUID) async {
+        guard var lease = executionLease, lease.id == executionID else { return }
+        if let cancellationTask = lease.cancellationTask {
+            await cancellationTask.value
+            return
+        }
+        let cancellationTask = Task { [weak self] in
+            lease.cancellationSignal.cancel()
+            await self?.performCancellation(
+                executionID: executionID,
+                state: lease.state,
+                webEnabled: lease.webEnabled,
+                phase: lease.phase
+            )
+        }
+        lease.cancellationTask = cancellationTask
+        executionLease = lease
+        await cancellationTask.value
+    }
+
+    private func performCancellation(
+        executionID: UUID,
+        state: ClientState,
+        webEnabled: Bool,
+        phase: ExecutionPhase
+    ) async {
+        switch phase {
+        case .preparingThread, .startingTurn:
+            await invalidateClient(state, webEnabled: webEnabled)
+        case .active(let threadID, let turnID, let timing):
+            timing.recordInterruptRequested()
+            do {
+                _ = try await state.client.sendRequest(
+                    "turn/interrupt",
+                    params: ["threadId": threadID, "turnId": turnID],
+                    timeoutSeconds: 5
+                )
+                timing.recordInterruptCompleted(succeeded: true)
+            } catch {
+                timing.recordInterruptCompleted(succeeded: false)
+                await invalidateClient(state, webEnabled: webEnabled)
+            }
+        }
+        if executionLease?.id == executionID {
+            activeTurn = nil
+        }
+    }
+
+    var debugIsExecuting: Bool { isExecuting }
+    var debugHasActiveTurn: Bool { activeTurn != nil }
 
     private static func setWebActivity(
         _ active: Bool,

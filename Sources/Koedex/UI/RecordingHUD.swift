@@ -1052,10 +1052,14 @@ final class RecordingHUDController {
     }
 
     func flashError(durationSeconds: Double = 2.0) {
+        flashError(message: "", durationSeconds: durationSeconds)
+    }
+
+    func flashError(message: String, durationSeconds: Double = 2.0) {
         ensurePanel()
         transientMessageTask?.cancel()
         transientWarning = false
-        hostingView?.rootView = makeView(overridePhase: .error(""))
+        hostingView?.rootView = makeView(overridePhase: .error(message))
         panel?.orderFrontRegardless()
 
         transientMessageTask = Task { [weak self] in

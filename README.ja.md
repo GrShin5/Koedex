@@ -50,8 +50,10 @@ Koedexは独立したコミュニティプロジェクトです。**OpenAIと提
   サブスクリプションを使ってOpenAIと通信します。Koedexは `mcp_servers={}` `plugins={}` を指定して
   `codex app-server` を起動し、`~/.codex/config.toml` は変更しません。
 - それ以外――設定、履歴、ユーザー辞書、カスタムインストラクション――はすべて
-  `~/Library/Application Support/Koedex/` 以下にローカル保存され、Koedex自身がどこかへ送信することは
-  ありません。
+  `~/Library/Application Support/Koedex/` 以下にローカル保存されます。設定と履歴をKoedex自身が
+  どこかへ送信することはありません。**ユーザー辞書とカスタムインストラクションは、使われるときに
+  送信されます。** 有効な辞書項目と設定した指示文は、AI整形と「AIに指示」を使う際にプロンプトの
+  一部として `codex` へ渡され、文字起こしテキストと同じ経路で端末の外へ出ます。
 - **このフォルダは、本人のアクセスだけを許す権限で作られます。** ディレクトリは`0700`、
   Koedex自身が書くファイルは`0600`です。1台のMacを複数のアカウントで共有していても、
   他のアカウントから文字起こしの内容を読むことはできません。実際に他アカウントを遮っているのは
@@ -111,11 +113,11 @@ Claude CodeまたはCodex CLIに貼り付けるだけで導入できます。
 #### ソースを取得する
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_JA -->
-公式リポジトリから、リリース `v0.1.8` の一点だけを clone します。最新の状態（`main`）ではなく、
+公式リポジトリから、リリース `v0.1.9` の一点だけを clone します。最新の状態（`main`）ではなく、
 この版だけを取得してください。`Koedex` という名前のフォルダが既にある場所では実行しないでください。
 
 ```bash
-git clone --branch v0.1.8 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -125,7 +127,7 @@ clone してできたフォルダの中で、以下をそのまま貼り付け�
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.1.8"
+EXPECTED_TAG="v0.1.9"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -151,11 +153,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 ❌ が1つでも出たら、そこで中止してください。別のURL、別のタグ、ZIPダウンロード、ミラーなど、
 別の取得方法へ切り替えないでください。
 
-タグはあとから移動されうるため、GitHub の Releases 画面で `v0.1.8` が immutable release として
+タグはあとから移動されうるため、GitHub の Releases 画面で `v0.1.9` が immutable release として
 公開されていることも確認してください。GitHub CLI を使える場合は、次のコマンドでも確認できます。
 
 ```bash
-gh release verify v0.1.8 --repo GrShin5/Koedex
+gh release verify v0.1.9 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_JA -->
 

@@ -2150,7 +2150,7 @@ KoedexというmacOSアプリを、公式GitHubリポジトリから取得して
 
 【固定する取得元】
 - 公式URL: https://github.com/GrShin5/Koedex.git
-- リリースタグ: v0.1.8
+- リリースタグ: v0.1.9
 - 検証方式: GitHub immutable release
 
 【作業場所】
@@ -2171,15 +2171,15 @@ KoedexというmacOSアプリを、公式GitHubリポジトリから取得して
   独断で切り替えないでください。
 
 【取得と照合】
-1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.8をcloneしてください。
-   git clone --branch v0.1.8 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
+1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.9をcloneしてください。
+   git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
 2. clone直後、スクリプトを1つも実行する前に、次をすべて確認してください。
    - originのfetch URLが https://github.com/GrShin5/Koedex.git と一致する
      （比較時だけ末尾の.gitの有無を同一視して構いません）
-   - ローカルのv0.1.8 tagが指すcommitとHEADが完全一致する
-   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.8もHEADと完全一致する
-   - GitHub公式APIのreleases/tags/v0.1.8が、tag_name=v0.1.8かつimmutable=trueを返す
-   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.8 --repo GrShin5/Koedexも成功する
+   - ローカルのv0.1.9 tagが指すcommitとHEADが完全一致する
+   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.9もHEADと完全一致する
+   - GitHub公式APIのreleases/tags/v0.1.9が、tag_name=v0.1.9かつimmutable=trueを返す
+   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.9 --repo GrShin5/Koedexも成功する
    - checkoutがcleanで、未追跡ファイルもない
 3. 1つでも一致しない、releaseが存在しない・immutableでない、取得結果を確認できない、
    別refへ誘導された場合は、
@@ -2265,11 +2265,11 @@ swift --version
 ### 手順1：リポジトリを clone する
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_JA -->
-公式リポジトリから、リリース `v0.1.8` の一点だけを clone します。最新の状態（`main`）ではなく、
+公式リポジトリから、リリース `v0.1.9` の一点だけを clone します。最新の状態（`main`）ではなく、
 この版だけを取得してください。`Koedex` という名前のフォルダが既にある場所では実行しないでください。
 
 ```bash
-git clone --branch v0.1.8 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -2279,7 +2279,7 @@ clone してできたフォルダの中で、以下をそのまま貼り付け�
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.1.8"
+EXPECTED_TAG="v0.1.9"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -2305,11 +2305,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 ❌ が1つでも出たら、そこで中止してください。別のURL、別のタグ、ZIPダウンロード、ミラーなど、
 別の取得方法へ切り替えないでください。
 
-タグはあとから移動されうるため、GitHub の Releases 画面で `v0.1.8` が immutable release として
+タグはあとから移動されうるため、GitHub の Releases 画面で `v0.1.9` が immutable release として
 公開されていることも確認してください。GitHub CLI を使える場合は、次のコマンドでも確認できます。
 
 ```bash
-gh release verify v0.1.8 --repo GrShin5/Koedex
+gh release verify v0.1.9 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_JA -->
 
@@ -2389,8 +2389,8 @@ swift build
 
 | 項目 | 内容 |
 | --- | --- |
-| 対象リリース | v0.1.8 |
-| 対象アプリバージョン | 0.1.8 |
+| 対象リリース | v0.1.9 |
+| 対象アプリバージョン | 0.1.9 |
 | 説明書の言語 | 日本語 |
 
 この説明書は、上記のリリース時点のソースコードをもとに書かれています。
@@ -2436,7 +2436,7 @@ KoedexというmacOSアプリを、公式GitHubリポジトリの新しいリリ
 
 【固定する取得元】
 - 公式URL: https://github.com/GrShin5/Koedex.git
-- リリースタグ: v0.1.8
+- リリースタグ: v0.1.9
 - 検証方式: GitHub immutable release
 
 【作業場所】
@@ -2468,15 +2468,15 @@ KoedexというmacOSアプリを、公式GitHubリポジトリの新しいリリ
    しないでください。
 
 【手順2：新しいバージョンの取得と照合】
-1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.8をcloneしてください。
-   git clone --branch v0.1.8 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
+1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.9をcloneしてください。
+   git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
 2. clone直後、スクリプトを1つも実行する前に、次をすべて確認してください。
    - originのfetch URLが https://github.com/GrShin5/Koedex.git と一致する
      （比較時だけ末尾の.gitの有無を同一視して構いません）
-   - ローカルのv0.1.8 tagが指すcommitとHEADが完全一致する
-   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.8もHEADと完全一致する
-   - GitHub公式APIのreleases/tags/v0.1.8が、tag_name=v0.1.8かつimmutable=trueを返す
-   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.8 --repo GrShin5/Koedexも成功する
+   - ローカルのv0.1.9 tagが指すcommitとHEADが完全一致する
+   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.9もHEADと完全一致する
+   - GitHub公式APIのreleases/tags/v0.1.9が、tag_name=v0.1.9かつimmutable=trueを返す
+   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.9 --repo GrShin5/Koedexも成功する
    - checkoutがcleanで、未追跡ファイルもない
 3. 1つでも一致しない、releaseが存在しない・immutableでない、取得結果を確認できない、
    別refへ誘導された場合は、リポジトリ内のスクリプトを実行せず、確認できた値を表で

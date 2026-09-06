@@ -176,10 +176,20 @@ struct UserDictionaryWindow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: uiMetrics.layout(14)) {
             header
-            addOrEditPanel
-            Divider()
-            controls
-            entriesList
+            if dictionaryStore.requiresRecovery {
+                DictionaryRecoveryView(store: dictionaryStore, language: language, metrics: uiMetrics)
+                Spacer(minLength: 0)
+            } else {
+                if dictionaryStore.backupNeedsRetry {
+                    Button(uiText("安全用バックアップの保存を再試行")) {
+                        showMutationResult(dictionaryStore.retryLastKnownGoodBackup())
+                    }
+                }
+                addOrEditPanel
+                Divider()
+                controls
+                entriesList
+            }
         }
         .padding(.horizontal, uiMetrics.layout(20))
         .padding(.bottom, uiMetrics.layout(20))
@@ -260,9 +270,9 @@ struct UserDictionaryWindow: View {
     @ViewBuilder
     private var fileActionButtons: some View {
         Button(uiText("CSVを書き出す")) { exportDictionary() }
-            .disabled(dictionaryStore.entries.isEmpty)
+            .disabled(dictionaryStore.entries.isEmpty || dictionaryStore.requiresRecovery)
         Button(uiText("CSVを読み込む")) { chooseImportFile() }
-            .disabled(csvBannerState.isImportPreparing)
+            .disabled(csvBannerState.isImportPreparing || dictionaryStore.requiresRecovery)
         Button(uiText("テンプレートCSVをダウンロード")) { saveTemplate() }
     }
 
@@ -438,7 +448,7 @@ struct UserDictionaryWindow: View {
                 } else {
                     Toggle("", isOn: Binding(
                         get: { entry.enabled },
-                        set: { dictionaryStore.setEnabled(id: entry.id, enabled: $0) }
+                        set: { value in showMutationResult(dictionaryStore.setEnabled(id: entry.id, enabled: value)) }
                     ))
                     .labelsHidden()
                     .toggleStyle(.checkbox)
@@ -584,12 +594,13 @@ struct UserDictionaryWindow: View {
 
     private func performDictionaryDeletion() {
         guard let request = dictionaryDeletionRequest else { return }
-        dictionaryStore.delete(ids: request.targetIDs)
-        selectedDictionaryIDs.subtract(request.targetIDs)
-        if let editingID, request.targetIDs.contains(editingID) {
-            clearForm()
+        let result = dictionaryStore.delete(ids: request.targetIDs)
+        if result.succeeded {
+            selectedDictionaryIDs.subtract(request.targetIDs)
+            if let editingID, request.targetIDs.contains(editingID) { clearForm() }
+            dictionaryDeletionRequest = nil
         }
-        dictionaryDeletionRequest = nil
+        showMutationResult(result)
     }
 
     private func exportDictionary() {
@@ -711,8 +722,10 @@ struct UserDictionaryWindow: View {
             selectedDictionaryIDs = []
             importPreview = nil
             showCSVBanner(
-                message: uiFormat("読み込みが完了しました。追加: %d件、置換: %d件、既存を維持: %d件。", receipt.insertedCount, receipt.replacedCount, receipt.keptExistingCount),
-                isError: false,
+                message: receipt.hasBackupWarning
+                    ? uiText("CSVの読み込みは保存しましたが、バックアップを更新できませんでした。辞書の内容を確認してから、もう一度保存操作を試してください。")
+                    : uiFormat("読み込みが完了しました。追加: %d件、置換: %d件、既存を維持: %d件。", receipt.insertedCount, receipt.replacedCount, receipt.keptExistingCount),
+                isError: receipt.hasBackupWarning,
                 operationGeneration: operationGeneration
             )
         } catch PersonalDictionaryStore.ImportError.staleSnapshot {
@@ -723,9 +736,8 @@ struct UserDictionaryWindow: View {
                 operationGeneration: operationGeneration
             )
         } catch {
-            importPreview = nil
             showCSVBanner(
-                message: uiText("CSVの読み込みを確定できませんでした。もう一度試してください。"),
+                message: uiText("CSVの読み込みを保存できませんでした。内容と選択は残っています。もう一度試してください。"),
                 isError: true,
                 operationGeneration: operationGeneration
             )
@@ -758,8 +770,9 @@ struct UserDictionaryWindow: View {
 
     private func saveForm() {
         let forms = splitCommaSeparated(spokenForms)
+        let result: PersonalDictionaryStore.MutationResult
         if let editingID {
-            dictionaryStore.update(
+            result = dictionaryStore.update(
                 id: editingID,
                 preferredForm: preferredForm,
                 spokenForms: forms,
@@ -767,16 +780,35 @@ struct UserDictionaryWindow: View {
                 enabled: enabled
             )
         } else {
-            dictionaryStore.add(
+            result = dictionaryStore.add(
                 preferredForm: preferredForm,
                 spokenForms: forms,
-                notes: notes
+                notes: notes,
+                enabled: enabled
             )
-            if !enabled, let id = dictionaryStore.entries.first?.id {
-                dictionaryStore.setEnabled(id: id, enabled: false)
-            }
         }
-        clearForm()
+        if result.succeeded { clearForm() }
+        showMutationResult(result)
+    }
+
+    private func showMutationResult(_ result: PersonalDictionaryStore.MutationResult) {
+        let operationGeneration = csvBannerState.beginOperation()
+        switch result {
+        case .saved:
+            break
+        case .savedWithBackupWarning:
+            showCSVBanner(
+                message: uiText("辞書の変更は保存しましたが、安全用バックアップを更新できませんでした。もう一度保存操作を試してください。"),
+                isError: true,
+                operationGeneration: operationGeneration
+            )
+        case .failed:
+            showCSVBanner(
+                message: uiText("辞書の変更を保存できませんでした。入力内容は残っています。もう一度試してください。"),
+                isError: true,
+                operationGeneration: operationGeneration
+            )
+        }
     }
 
     private func startEditing(_ entry: PersonalDictionaryEntry) {
