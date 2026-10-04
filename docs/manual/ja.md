@@ -925,33 +925,32 @@ Koedex では、AI の[モデル](#モデル)を用途ごとに選べます。
 
 | 場所 | 用途 | 既定値 |
 | --- | --- | --- |
-| AIアシストのモデル選択 | 通常モードの整形 | 新規インストール時は GPT-5.6 Luna / low（取得できなかった場合は Codex CLI の設定に従います） |
-| AIに指示モードに使用するモデル | AIに指示モードの処理 | 新規インストール時は GPT-5.6 Luna / low（取得できなかった場合は Codex CLI の設定に従います） |
-| 最適化に使用するモデル | カスタムインストラクションの最適化 | 新規インストール時は GPT-5.6 Luna / low（取得できなかった場合は Codex CLI の設定に従います） |
+| AIアシストのモデル選択 | 通常モードの整形 | 新規インストール時は GPT-6 Luna / low（利用できない場合は従来の初期設定を保持します） |
+| AIに指示モードに使用するモデル | AIに指示モードの処理 | 新規インストール時は GPT-6 Luna / low（利用できない場合は従来の初期設定を保持します） |
+| 最適化に使用するモデル | カスタムインストラクションの最適化 | 新規インストール時は GPT-6 Luna / low（利用できない場合は従来の初期設定を保持します） |
 
 #### 選べるモデル
 
 選べるモデルの一覧は、Codex CLI から動的に取得します。取得できなかった場合に備えて、
 内蔵の一覧もあります。
 
-プリセットとして表示されるのは次の6つです。
+AIアシストの「モデルの選択方法」は、「カスタム選択」と「Codex CLI設定に従う」の2択です。
+「カスタム選択」ではモデルと推論レベルを個別に選べます。新規インストール時に
+GPT-6 Luna / low が利用可能なら、「カスタム選択」で初期設定されます。
+固定モデルのプリセットはありません。
 
-| 表示名 |
-| --- |
-| GPT-5.6 Luna / low（高速・低コスト） |
-| GPT-5.6 Luna / medium（バランス） |
-| GPT-5.6 Terra / low（軽快な日常利用） |
-| GPT-5.6 Terra / medium（日常利用の推奨） |
-| GPT-5.6 Sol / medium（複雑な処理向け） |
-| GPT-5.6 Sol / high（高精度） |
+3箇所とも、モデルと推論レベルを変更した後は「保存」を押してください。
+最適化は保存済みの設定を使用します。最適化モデルの未保存の変更は、設定画面を閉じると破棄されます。
 
 [推論レベル](#推論レベル)は low / medium / high / xhigh から選べます。
+
+使用するAIモデルや推論レベルによって、文章整形の表現・仕上がり、AIに指示モードの回答内容や検索の進め方が異なることがあります。同じ指示でも、モデルの変更や更新によって結果が変わる場合があります。期待する結果が得られないときは、指示を具体化する、必要に応じて参照する情報源を指定する、別のモデルや推論レベルを試す方法があります。ただし、改善を保証するものではありません。
 
 #### 注意点
 
 | 注意点 | 内容 |
 | --- | --- |
-| 新規インストール時の自動設定 | 初回接続でモデル一覧を取得し、`GPT-5.6 Luna / low` が使えれば3箇所へ一括で設定します。**すでに使っている方の選択は変更しません** |
+| 新規インストール時の自動設定 | 初回接続でモデル一覧を取得し、`GPT-6 Luna / low` が使えれば3箇所へ一括で設定します。**すでに使っている方の選択は変更しません** |
 | 一覧を取得できなかったとき | 「モデル一覧を取得できませんでした。保存済みの設定は保持されています。Codex CLIを最新バージョンに更新してから、もう一度モデル一覧を更新してください。」と表示され、**保存ボタンが無効になります** |
 | 保存ボタンが押せない理由 | これは不具合ではありません。存在しないかもしれないモデル名を、当てずっぽうで保存してしまわないための設計です |
 | 保存できるタイミング | **録音中や処理中は保存できません** |
@@ -1633,7 +1632,7 @@ Koedex が `codex` を見つけられませんでした。ターミナルで `wh
 #### Codexの応答がタイムアウトしました
 
 応答が時間内に返りませんでした。インターネット接続を確認して、もう一度試してください。
-長い文章では、より軽いモデル（例：GPT-5.6 Luna / low）に変えると改善することがあります。
+長い文章では、より軽いモデル（例：GPT-6 Luna / low）に変えると改善することがあります。
 
 #### Codexから不正な応答を受け取りました
 
@@ -2150,7 +2149,7 @@ KoedexというmacOSアプリを、公式GitHubリポジトリから取得して
 
 【固定する取得元】
 - 公式URL: https://github.com/GrShin5/Koedex.git
-- リリースタグ: v0.1.9
+- リリースタグ: v0.1.10
 - 検証方式: GitHub immutable release
 
 【作業場所】
@@ -2171,15 +2170,15 @@ KoedexというmacOSアプリを、公式GitHubリポジトリから取得して
   独断で切り替えないでください。
 
 【取得と照合】
-1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.9をcloneしてください。
-   git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
+1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.10をcloneしてください。
+   git clone --branch v0.1.10 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
 2. clone直後、スクリプトを1つも実行する前に、次をすべて確認してください。
    - originのfetch URLが https://github.com/GrShin5/Koedex.git と一致する
      （比較時だけ末尾の.gitの有無を同一視して構いません）
-   - ローカルのv0.1.9 tagが指すcommitとHEADが完全一致する
-   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.9もHEADと完全一致する
-   - GitHub公式APIのreleases/tags/v0.1.9が、tag_name=v0.1.9かつimmutable=trueを返す
-   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.9 --repo GrShin5/Koedexも成功する
+   - ローカルのv0.1.10 tagが指すcommitとHEADが完全一致する
+   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.10もHEADと完全一致する
+   - GitHub公式APIのreleases/tags/v0.1.10が、tag_name=v0.1.10かつimmutable=trueを返す
+   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.10 --repo GrShin5/Koedexも成功する
    - checkoutがcleanで、未追跡ファイルもない
 3. 1つでも一致しない、releaseが存在しない・immutableでない、取得結果を確認できない、
    別refへ誘導された場合は、
@@ -2265,11 +2264,11 @@ swift --version
 ### 手順1：リポジトリを clone する
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_JA -->
-公式リポジトリから、リリース `v0.1.9` の一点だけを clone します。最新の状態（`main`）ではなく、
+公式リポジトリから、リリース `v0.1.10` の一点だけを clone します。最新の状態（`main`）ではなく、
 この版だけを取得してください。`Koedex` という名前のフォルダが既にある場所では実行しないでください。
 
 ```bash
-git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.1.10 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -2279,7 +2278,7 @@ clone してできたフォルダの中で、以下をそのまま貼り付け�
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.1.9"
+EXPECTED_TAG="v0.1.10"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -2305,11 +2304,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 ❌ が1つでも出たら、そこで中止してください。別のURL、別のタグ、ZIPダウンロード、ミラーなど、
 別の取得方法へ切り替えないでください。
 
-タグはあとから移動されうるため、GitHub の Releases 画面で `v0.1.9` が immutable release として
+タグはあとから移動されうるため、GitHub の Releases 画面で `v0.1.10` が immutable release として
 公開されていることも確認してください。GitHub CLI を使える場合は、次のコマンドでも確認できます。
 
 ```bash
-gh release verify v0.1.9 --repo GrShin5/Koedex
+gh release verify v0.1.10 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_JA -->
 
@@ -2389,8 +2388,8 @@ swift build
 
 | 項目 | 内容 |
 | --- | --- |
-| 対象リリース | v0.1.9 |
-| 対象アプリバージョン | 0.1.9 |
+| 対象リリース | v0.1.10 |
+| 対象アプリバージョン | 0.1.10 |
 | 説明書の言語 | 日本語 |
 
 この説明書は、上記のリリース時点のソースコードをもとに書かれています。
@@ -2436,7 +2435,7 @@ KoedexというmacOSアプリを、公式GitHubリポジトリの新しいリリ
 
 【固定する取得元】
 - 公式URL: https://github.com/GrShin5/Koedex.git
-- リリースタグ: v0.1.9
+- リリースタグ: v0.1.10
 - 検証方式: GitHub immutable release
 
 【作業場所】
@@ -2468,15 +2467,15 @@ KoedexというmacOSアプリを、公式GitHubリポジトリの新しいリリ
    しないでください。
 
 【手順2：新しいバージョンの取得と照合】
-1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.9をcloneしてください。
-   git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
+1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.10をcloneしてください。
+   git clone --branch v0.1.10 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
 2. clone直後、スクリプトを1つも実行する前に、次をすべて確認してください。
    - originのfetch URLが https://github.com/GrShin5/Koedex.git と一致する
      （比較時だけ末尾の.gitの有無を同一視して構いません）
-   - ローカルのv0.1.9 tagが指すcommitとHEADが完全一致する
-   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.9もHEADと完全一致する
-   - GitHub公式APIのreleases/tags/v0.1.9が、tag_name=v0.1.9かつimmutable=trueを返す
-   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.9 --repo GrShin5/Koedexも成功する
+   - ローカルのv0.1.10 tagが指すcommitとHEADが完全一致する
+   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.10もHEADと完全一致する
+   - GitHub公式APIのreleases/tags/v0.1.10が、tag_name=v0.1.10かつimmutable=trueを返す
+   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.10 --repo GrShin5/Koedexも成功する
    - checkoutがcleanで、未追跡ファイルもない
 3. 1つでも一致しない、releaseが存在しない・immutableでない、取得結果を確認できない、
    別refへ誘導された場合は、リポジトリ内のスクリプトを実行せず、確認できた値を表で

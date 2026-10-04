@@ -752,14 +752,14 @@ final class SettingsStore: ObservableObject {
         var updated = settings
         updated.initialModelDefaultsResolved = true
 
-        guard let luna = CodexModelCatalog.model(slug: "gpt-5.6-luna", in: models),
+        guard let luna = CodexModelCatalog.model(slug: "gpt-6-luna", in: models),
               CodexModelCatalog.isUserSelectable(effort: "low", for: luna) else {
             settings = updated
             return .retainedExistingDefaults
         }
 
         let lunaLow = CodexModelSettings(
-            mode: .explicit,
+            mode: .custom,
             selectedModelSlug: luna.slug,
             selectedReasoningEffort: "low"
         )

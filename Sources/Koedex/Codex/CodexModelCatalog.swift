@@ -73,19 +73,6 @@ struct CodexModelInfo: Codable, Hashable, Identifiable {
     }
 }
 
-struct CodexModelPreset: Identifiable, Hashable {
-    let slug: String
-    let effort: String
-    /// 表示文字列ではなく安定した翻訳キー。日本語文をキーにすると英語カタログ欠落を検出できない。
-    let localizationKey: String
-
-    var id: String { "preset|\(slug)|\(effort)" }
-
-    func displayName(for language: AppLanguage) -> String {
-        AppLocalizer.text(localizationKey, language: language)
-    }
-}
-
 enum CodexModelCatalog {
     /// UIでの表示順をCLIの辞書順から独立させる。新しいライブモデルは既知モデルの後ろに置く。
     private static let preferredModelSlugOrder = [
@@ -100,15 +87,6 @@ enum CodexModelCatalog {
     private static let preferredModelSlugRanks = Dictionary(
         uniqueKeysWithValues: preferredModelSlugOrder.enumerated().map { ($0.element, $0.offset) }
     )
-
-    static let builtInPresets: [CodexModelPreset] = [
-        CodexModelPreset(slug: "gpt-5.6-luna", effort: "low", localizationKey: "model_preset_luna_low"),
-        CodexModelPreset(slug: "gpt-5.6-luna", effort: "medium", localizationKey: "model_preset_luna_medium"),
-        CodexModelPreset(slug: "gpt-5.6-terra", effort: "low", localizationKey: "model_preset_terra_low"),
-        CodexModelPreset(slug: "gpt-5.6-terra", effort: "medium", localizationKey: "model_preset_terra_medium"),
-        CodexModelPreset(slug: "gpt-5.6-sol", effort: "medium", localizationKey: "model_preset_sol_medium"),
-        CodexModelPreset(slug: "gpt-5.6-sol", effort: "high", localizationKey: "model_preset_sol_high"),
-    ]
 
     static let builtInModels: [CodexModelInfo] = [
         CodexModelInfo(

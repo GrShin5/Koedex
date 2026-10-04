@@ -138,12 +138,12 @@ extended attributes in place, so it does not fix the problem.**
 #### Get the source
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_EN -->
-Clone only the single point tagged `v0.1.9` from the official repository. Do not take the latest
+Clone only the single point tagged `v0.1.10` from the official repository. Do not take the latest
 state (`main`) — take this release and nothing else. Do not run this where a folder named `Koedex`
 already exists.
 
 ```bash
-git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.1.10 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -153,7 +153,7 @@ Inside the folder the clone created, paste and run the following as-is.
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.1.9"
+EXPECTED_TAG="v0.1.10"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -179,11 +179,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 If even one ❌ appears, stop there. Do not switch to a different URL, a different tag, a ZIP
 download, a mirror, or any other way of obtaining the source.
 
-A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.9` is published as
+A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.10` is published as
 an immutable release. If you have the GitHub CLI, you can confirm the same thing with:
 
 ```bash
-gh release verify v0.1.9 --repo GrShin5/Koedex
+gh release verify v0.1.10 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_EN -->
 
@@ -394,6 +394,8 @@ Then reopen Koedex and grant the three permissions normally, as in
   because they change what is drawn. This applies at the moment text is
   inserted; text you copy out of the result window or the history list is
   passed through as-is.
+
+The AI model and reasoning effort can affect the wording and finish of cleaned-up text, as well as answers and search approaches in AI Command mode. Results may change even with the same instructions when you switch models or a model is updated. If the result does not meet your expectations, try making your instructions more specific, naming a source when relevant, or using another model or reasoning effort. These steps do not guarantee improvement.
 
 ### AI command mode
 

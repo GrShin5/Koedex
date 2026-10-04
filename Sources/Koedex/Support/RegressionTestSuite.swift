@@ -3133,7 +3133,8 @@ enum RegressionTestSuite {
             "オン：フィラー除去・句読点補正等、AIによる文章整形を行ってから挿入します。オフ：音声認識した結果をそのまま即挿入します。",
             "AIアシストが有効な場合、すべてのモードにおいて、選択した言語で出力されます。ただし、音声で明示した出力言語の指定は常に優先されます。",
             "AIアシストのモデル選択",
-            "新規インストール時は、モデル一覧で利用可能な場合にGPT-5.6 Luna/low がデフォルトとして設定されます。",
+            "モデルの選択方法",
+            "新規インストール時は、モデル一覧で利用可能な場合にGPT-6 Luna/low がデフォルトとして設定されます。",
             "カスタムインストラクション（通常モード / ハンズフリー送信モード）",
             "通常モードとハンズフリー送信モードのAI整形に適用されます。変更は次の録音から反映されます。",
             "ブラウザや各種アプリへ対応（テキストを直接挿入できないアプリやWebページに対し、別の入力方法を使います）",
@@ -3144,7 +3145,7 @@ enum RegressionTestSuite {
             "起動キーは1〜3個の組み合わせ、停止キーは1個です。キーの認識確認と衝突検査は初回セットアップで行います（キーを押す順番によっては起動しない場合があります）。",
             settingsClipboardGuidanceKey,
             "最適化に使用するモデル（通常モード／ハンズフリー送信モード／AIに指示モード共通）",
-            "各カスタムインストラクションで「最適化」を実行する時だけ使います。選択中のモデルと推論レベルで最適化します。",
+            "各カスタムインストラクションで「最適化」を実行する時だけ使います。モデルと推論レベルを選び、保存すると反映されます。",
             "通常モードで保存したカスタムインストラクションは、ハンズフリー送信モードのAI整形にも適用されます。変更は次の録音から反映されます。"
         ]
         expect(
@@ -4255,14 +4256,6 @@ enum RegressionTestSuite {
         expect(
             Set(CodexModelCatalog.builtInModels.map(\.slug)) == expectedBuiltInModelSlugs,
             "model catalog contains the six supported built-in models"
-        )
-        expect(
-            CodexModelCatalog.builtInPresets.allSatisfy {
-                AppLocalizer.hasTranslation(for: $0.localizationKey, language: .english)
-                    && AppLocalizer.hasTranslation(for: $0.localizationKey, language: .japanese)
-                    && $0.displayName(for: .english) != "Localization unavailable"
-            },
-            "model presets use stable localization keys in both languages"
         )
         expect(
             DebugPermissionResetTarget.isIsolatedDebugBundleIdentifier(
@@ -5852,8 +5845,8 @@ enum RegressionTestSuite {
         let migratedAICommandModel = migratedStore.settings.aiCommandSettings.modelSettings
         let migratedOptimizationModel = migratedStore.settings.customInstructionOptimizationModelSettings
         let liveLuna = CodexModelInfo(
-            slug: "gpt-5.6-luna",
-            displayName: "GPT-5.6 Luna",
+            slug: "gpt-6-luna",
+            displayName: "GPT-6 Luna",
             defaultReasoningLevel: "low",
             supportedReasoningLevels: [
                 CodexReasoningLevel(effort: "low", description: ""),
@@ -6080,21 +6073,90 @@ enum RegressionTestSuite {
         )
         expect(
             freshStore.settings.modelSettings == CodexModelSettings(
-                mode: .explicit,
-                selectedModelSlug: "gpt-5.6-luna",
+                mode: .custom,
+                selectedModelSlug: "gpt-6-luna",
                 selectedReasoningEffort: "low"
             )
                 && freshStore.settings.aiCommandSettings.modelSettings == CodexModelSettings(
-                    mode: .explicit,
-                    selectedModelSlug: "gpt-5.6-luna",
+                    mode: .custom,
+                    selectedModelSlug: "gpt-6-luna",
                     selectedReasoningEffort: "low"
                 )
                 && freshStore.settings.customInstructionOptimizationModelSettings == CodexModelSettings(
-                    mode: .explicit,
-                    selectedModelSlug: "gpt-5.6-luna",
+                    mode: .custom,
+                    selectedModelSlug: "gpt-6-luna",
                     selectedReasoningEffort: "low"
                 ),
             "Luna defaults use low reasoning for all three model selections"
+        )
+
+        let oldLunaStore = SettingsStore(
+            storageRootURL: storageRootURL.appendingPathComponent("old-luna-settings", isDirectory: true)
+        )
+        let oldLunaDefaults = oldLunaStore.settings
+        var oldLuna = liveLuna
+        oldLuna.slug = "gpt-5.6-luna"
+        expect(
+            oldLunaStore.resolveInitialModelDefaults(usingLiveModels: [oldLuna]) == .retainedExistingDefaults
+                && oldLunaStore.settings.modelSettings == oldLunaDefaults.modelSettings
+                && oldLunaStore.settings.aiCommandSettings.modelSettings == oldLunaDefaults.aiCommandSettings.modelSettings
+                && oldLunaStore.settings.customInstructionOptimizationModelSettings
+                    == oldLunaDefaults.customInstructionOptimizationModelSettings,
+            "old Luna alone does not satisfy the GPT-6 Luna initial default"
+        )
+        freshStore.flushPendingSave()
+        let reloadedFreshStore = SettingsStore(storageRootURL: freshSettingsRoot)
+        expect(
+            reloadedFreshStore.resolveInitialModelDefaults(usingLiveModels: [liveLuna]) == .alreadyResolved
+                && reloadedFreshStore.settings.modelSettings == freshStore.settings.modelSettings
+                && reloadedFreshStore.settings.aiCommandSettings.modelSettings == freshStore.settings.aiCommandSettings.modelSettings
+                && reloadedFreshStore.settings.customInstructionOptimizationModelSettings
+                    == freshStore.settings.customInstructionOptimizationModelSettings,
+            "GPT-6 Luna custom defaults survive saving and reopening without reinitialization"
+        )
+
+        let optimizationSaveRoot = storageRootURL.appendingPathComponent("optimization-save", isDirectory: true)
+        let optimizationSaveStore = SettingsStore(storageRootURL: optimizationSaveRoot)
+        optimizationSaveStore.flushPendingSave()
+        let optimizationOriginal = optimizationSaveStore.settings
+        let optimizationDraft = CodexModelSettings(
+            mode: .explicit, selectedModelSlug: liveLuna.slug, selectedReasoningEffort: "low"
+        )
+        expect(
+            SettingsStore(storageRootURL: optimizationSaveRoot).settings.customInstructionOptimizationModelSettings
+                == optimizationOriginal.customInstructionOptimizationModelSettings,
+            "editing an optimization draft leaves persisted settings unchanged"
+        )
+        func optimizationSaveAllowed(
+            draft: CodexModelSettings = optimizationDraft,
+            models: [CodexModelInfo] = [liveLuna],
+            verified: Bool = true, busy: Bool = false, canWrite: Bool = true
+        ) -> Bool {
+            OptimizationModelSavePolicy.allowsSave(
+                draft: draft, saved: optimizationOriginal.customInstructionOptimizationModelSettings,
+                liveModels: models, catalogVerified: verified, busy: busy, canWrite: canWrite
+            )
+        }
+        var unsupportedOptimizationDraft = optimizationDraft
+        unsupportedOptimizationDraft.selectedReasoningEffort = "ultra"
+        expect(
+            optimizationSaveAllowed()
+                && !optimizationSaveAllowed(draft: optimizationOriginal.customInstructionOptimizationModelSettings)
+                && !optimizationSaveAllowed(models: [])
+                && !optimizationSaveAllowed(verified: false)
+                && !optimizationSaveAllowed(busy: true)
+                && !optimizationSaveAllowed(canWrite: false)
+                && !optimizationSaveAllowed(draft: unsupportedOptimizationDraft),
+            "optimization save requires changes, verified available model and effort, idle state, and writable settings"
+        )
+        optimizationSaveStore.settings.customInstructionOptimizationModelSettings = optimizationDraft
+        optimizationSaveStore.flushPendingSave()
+        let reloadedOptimization = SettingsStore(storageRootURL: optimizationSaveRoot).settings
+        expect(
+            reloadedOptimization.customInstructionOptimizationModelSettings == optimizationDraft
+                && reloadedOptimization.modelSettings == optimizationOriginal.modelSettings
+                && reloadedOptimization.aiCommandSettings == optimizationOriginal.aiCommandSettings,
+            "explicit optimization save survives reopening without changing the other two model settings"
         )
 
         let noLunaSettingsRoot = storageRootURL.appendingPathComponent("no-luna-settings", isDirectory: true)
@@ -6116,8 +6178,8 @@ enum RegressionTestSuite {
         let lunaWithoutLowStore = SettingsStore(storageRootURL: lunaWithoutLowSettingsRoot)
         let lunaWithoutLowOriginalSettings = lunaWithoutLowStore.settings
         let liveLunaWithoutLow = CodexModelInfo(
-            slug: "gpt-5.6-luna",
-            displayName: "GPT-5.6 Luna",
+            slug: "gpt-6-luna",
+            displayName: "GPT-6 Luna",
             defaultReasoningLevel: "medium",
             supportedReasoningLevels: [CodexReasoningLevel(effort: "medium", description: "")],
             visibility: "list"

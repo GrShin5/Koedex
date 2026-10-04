@@ -100,7 +100,7 @@
 "ワンタップ（1回タップで開始・もう1回タップで停止。）" = "Tap once to start, then tap again to stop";
 "長押し（押している間だけ録音）" = "Hold to record";
 "AIアシストモデルの選択" = "AI Assist model";
-"モデルプリセット" = "Model preset";
+"モデルの選択方法" = "Model selection method";
 "Codex CLI設定に従う" = "Follow Codex CLI settings";
 "カスタム選択" = "Custom selection";
 "モデル" = "Model";
@@ -595,12 +595,6 @@
 "%@の権限をリセットできませんでした。macOSのシステム設定から確認してください。" = "Could not reset permissions for %@. Check macOS System Settings.";
 "%@の権限リセットを開始できませんでした。macOSのシステム設定から確認してください。" = "Could not start the permission reset for %@. Check macOS System Settings.";
 "許可されていないアプリでは権限リセットを実行できません。" = "Permission reset is not available in this app.";
-"model_preset_luna_low" = "GPT-5.6 Luna / low (fast, cost-efficient)";
-"model_preset_luna_medium" = "GPT-5.6 Luna / medium (balanced)";
-"model_preset_terra_low" = "GPT-5.6 Terra / low (light everyday use)";
-"model_preset_terra_medium" = "GPT-5.6 Terra / medium (recommended for everyday use)";
-"model_preset_sol_medium" = "GPT-5.6 Sol / medium (complex tasks)";
-"model_preset_sol_high" = "GPT-5.6 Sol / high (higher accuracy)";
 "注意" = "Important";
 "ブラウザや各種アプリへ対応" = "Browser and Other App Support";
 "互換入力モード（ON推奨）" = "Compatibility Input Mode (ON Recommended)";
@@ -676,7 +670,7 @@
 "セットアップ完了後は、設定の「AIに指示」から詳しく変更できます。" = "After setup, you can fine-tune this from AI Command in Settings.";
 "元のアプリに戻れなかったため、クリップボードの内容でAIに指示を開始しませんでした。元のアプリを前面にして、もう一度お試しください。" = "Koedex could not return to the original app, so it did not start AI Command with the clipboard contents. Bring the original app to the front and try again.";
 "通常の音声入力と「AIに指示」の違い、開始・停止キー、Web検索時の扱いをもう一度短く確認できます。既存の設定は変更されません。" = "Review the difference between standard dictation and AI Command, the start and stop keys, and how Web search is handled. Your existing settings are not changed.";
-"新規インストール時は、モデル一覧で利用可能な場合に GPT-5.6 Luna / low を初期値として使います。既存のモデル選択は変更されません。" = "For a new installation, GPT-5.6 Luna / low is used as the initial value when it is available in the model list. Existing model choices are not changed.";
+"新規インストール時は、モデル一覧で利用可能な場合に GPT-6 Luna / low を初期値として使います。既存のモデル選択は変更されません。" = "For a new installation, GPT-6 Luna / low is used as the initial value when it is available in the model list. Existing model choices are not changed.";
 "パスワード入力などで安全な入力が有効な間は、通常モード・「AIに指示」・ハンズフリー送信を開始できません。入力を閉じてから開始してください。" = "Standard mode, AI Command, and Hands-free send cannot start while Secure Input is active, such as during password entry. Close that input before starting.";
 "ハンズフリー送信" = "Hands-free send";
 "通常モード" = "Standard mode";
@@ -767,7 +761,7 @@
 "オン：フィラー除去・句読点補正等、AIによる文章整形を行ってから挿入します。オフ：音声認識した結果をそのまま即挿入します。" = "On: use AI text cleanup, including filler removal and punctuation correction, before inserting. Off: insert the speech-recognition result immediately as-is.";
 "AIアシストが有効な場合、すべてのモードにおいて、選択した言語で出力されます。ただし、音声で明示した出力言語の指定は常に優先されます。" = "When AI Assist is enabled, output is produced in the selected language in every mode. An output-language request explicitly made in speech always takes priority.";
 "AIアシストのモデル選択" = "AI Assist model selection";
-"新規インストール時は、モデル一覧で利用可能な場合にGPT-5.6 Luna/low がデフォルトとして設定されます。" = "For a new installation, GPT-5.6 Luna/low is set as the default when it is available in the model list.";
+"新規インストール時は、モデル一覧で利用可能な場合にGPT-6 Luna/low がデフォルトとして設定されます。" = "For a new installation, GPT-6 Luna/low is set as the default when it is available in the model list.";
 "カスタムインストラクション（通常モード / ハンズフリー送信モード）" = "Custom instruction (Standard mode / Hands-free send mode)";
 "通常モードとハンズフリー送信モードのAI整形に適用されます。変更は次の録音から反映されます。" = "Applies to AI cleanup in Standard mode and Hands-free send mode. Changes take effect from the next recording.";
 "ブラウザや各種アプリへ対応（テキストを直接挿入できないアプリやWebページに対し、別の入力方法を使います）" = "Browser and Other App Support (uses another input method for apps and web pages where text cannot be inserted directly)";
@@ -778,7 +772,7 @@
 "起動キーは1〜3個の組み合わせ、停止キーは1個です。キーの認識確認と衝突検査は初回セットアップで行います（キーを押す順番によっては起動しない場合があります）。" = "The launch key uses one to three keys and the stop key uses one. Setup checks key recognition and conflicts. Depending on the order in which keys are pressed, it may not launch.";
 "Google DocsやNotionのように、Koedexが「いま選択されている文字」を読み取れないアプリがあります。この設定はその回避策で、選択のかわりに自分でコピーしたものをAIへ渡します。\n\n例：Google Docsで書いた段落を英訳したい\n　1. 段落を選んで、自分で ⌘C でコピーする\n　2. %@ を最初に押しながら、AIに指示モードの起動キーを押す（キーを押す順番が違うと起動しない場合があります）\n　3. 「英語にして」と話す\n　4. Koedexはカーソル位置への挿入を試みます\n\n・追加キー（%@）を最初に押しながら、「AIに指示モード」の起動キーを押してください\n・追加キーは左右どちらでも同じです\n・安全な入力が有効な間、秘匿指定・Koedex自身の出力・テキスト以外・長すぎる内容はAIへ渡さず中止します。読めない場合に一般質問へ切り替えることはありません\n・貼り付けが反映されたかをKoedexは確認できません\n・入力後、Koedexが所有していたクリップボードだけを復元します。途中であなたや他のアプリが新しくコピーした内容は上書きしません\n・この設定は「互換入力モード」とは別です。ONにしても他の設定は変わりません" = "Some apps, such as Google Docs and Notion, do not let Koedex read the text currently selected. This setting is a workaround: instead of a selection, copy the text yourself and Koedex sends that copy to AI.\n\nExample: translating a paragraph you wrote in Google Docs\n  1. Select the paragraph and copy it with ⌘C\n  2. Press %@ first, then press the AI Command mode launch key (it may not launch if the keys are pressed in a different order)\n  3. Say \"translate this into English\"\n  4. Koedex attempts to insert the result at the cursor\n\n• Hold the extra key (%@) first, then press the AI Command mode launch key\n• Either the left or right extra key works\n• While Secure Input is active, content marked confidential, Koedex's own output, non-text content, and overlong content are not sent to AI. Koedex stops rather than switching to a general question when it cannot read the content\n• Koedex cannot confirm that the paste landed\n• After input, Koedex restores only clipboard contents it still owns. It never overwrites content newly copied by you or another app\n• This setting is separate from Compatibility Input Mode. Turning it on changes nothing else";
 "最適化に使用するモデル（通常モード／ハンズフリー送信モード／AIに指示モード共通）" = "Model used for optimization (shared by Standard mode, Hands-free send mode, and AI Command mode)";
-"各カスタムインストラクションで「最適化」を実行する時だけ使います。選択中のモデルと推論レベルで最適化します。" = "Used only when optimizing any custom instruction. It uses the selected model and reasoning level.";
+"各カスタムインストラクションで「最適化」を実行する時だけ使います。モデルと推論レベルを選び、保存すると反映されます。" = "Used only when you optimize custom instructions. Choose a model and reasoning effort, then save to apply them.";
 "通常モードで保存したカスタムインストラクションは、ハンズフリー送信モードのAI整形にも適用されます。変更は次の録音から反映されます。" = "The custom instruction saved in Standard mode also applies to AI cleanup in Hands-free send mode. Changes take effect from the next recording.";
 
 /* Onboarding redline reconciliation */

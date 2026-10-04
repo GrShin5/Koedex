@@ -3,6 +3,23 @@ import AppKit
 import Carbon.HIToolbox
 import Combine
 
+enum OptimizationModelSavePolicy {
+    static func allowsSave(
+        draft: CodexModelSettings,
+        saved: CodexModelSettings,
+        liveModels: [CodexModelInfo],
+        catalogVerified: Bool,
+        busy: Bool,
+        canWrite: Bool
+    ) -> Bool {
+        guard canWrite, catalogVerified, !busy, draft != saved,
+              let model = CodexModelCatalog.model(slug: draft.selectedModelSlug, in: liveModels) else {
+            return false
+        }
+        return CodexModelCatalog.isUserSelectable(effort: draft.selectedReasoningEffort, for: model)
+    }
+}
+
 private enum SettingsTab: String, CaseIterable, Identifiable {
     case settings
     case history
@@ -318,6 +335,7 @@ struct SettingsView: View {
     @State private var aiCommandCustomInstructionMessage: String?
     @State private var aiCommandCustomInstructionDraft = ""
     @State private var aiCommandCustomInstructionHistoryCursor = -1
+    @State private var optimizationModelSettingsDraft = CodexModelSettings.optimizationDefault
     @State private var modelSettingsDraft = CodexModelSettings.default
     @State private var aiCommandModelSettingsDraft = AICommandSettings.default.modelSettings
     @State private var aiCommandWebSearchDraft = AICommandSettings.default.webSearchEnabled
@@ -470,6 +488,7 @@ struct SettingsView: View {
             refreshHotkeyDerivedState()
         }
         .onDisappear {
+            optimizationModelSettingsDraft = store.settings.customInstructionOptimizationModelSettings
             stopKeyCapture()
             // 4秒の消去待ちが残っていると、閉じたあともViewを掴んだままになる。
             aiProcessingResetDismissTask?.cancel()
@@ -839,14 +858,11 @@ struct SettingsView: View {
         settingsSection {
             sectionTitle("AIアシストのモデル選択")
             helperText("この設定はKoedex内のAIアシストにだけ使われ、Codex CLI全体の設定は変更しません。")
-            helperText("新規インストール時は、モデル一覧で利用可能な場合にGPT-5.6 Luna/low がデフォルトとして設定されます。")
+            helperText("新規インストール時は、モデル一覧で利用可能な場合にGPT-6 Luna/low がデフォルトとして設定されます。")
 
-            Picker(uiText("モデルプリセット"), selection: modelPresetBinding) {
-                Text(uiText("Codex CLI設定に従う")).tag("cli")
-                ForEach(CodexModelCatalog.builtInPresets) { preset in
-                    Text(preset.displayName(for: uiLanguage)).tag(preset.id)
-                }
+            Picker(uiText("モデルの選択方法"), selection: modelSelectionModeBinding) {
                 Text(uiText("カスタム選択")).tag("custom")
+                Text(uiText("Codex CLI設定に従う")).tag("cli")
             }
             .pickerStyle(.menu)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1323,7 +1339,7 @@ struct SettingsView: View {
     private var aiCommandModelSettingsSection: some View {
         settingsSection {
             sectionTitle("AIに指示モードに使用するモデル")
-            helperText("新規インストール時は、モデル一覧で利用可能な場合にGPT-5.6 Luna/low がデフォルトとして設定されます。")
+            helperText("新規インストール時は、モデル一覧で利用可能な場合にGPT-6 Luna/low がデフォルトとして設定されます。")
 
             modelAndReasoningPickerRow(
                 model: {
@@ -1528,8 +1544,8 @@ struct SettingsView: View {
     private var optimizationModelSettingsSection: some View {
         settingsSection {
             sectionTitle("最適化に使用するモデル（通常モード／ハンズフリー送信モード／AIに指示モード共通）")
-            helperText("各カスタムインストラクションで「最適化」を実行する時だけ使います。選択中のモデルと推論レベルで最適化します。")
-            helperText("新規インストール時は、モデル一覧で利用可能な場合にGPT-5.6 Luna/low がデフォルトとして設定されます。")
+            helperText("各カスタムインストラクションで「最適化」を実行する時だけ使います。モデルと推論レベルを選び、保存すると反映されます。")
+            helperText("新規インストール時は、モデル一覧で利用可能な場合にGPT-6 Luna/low がデフォルトとして設定されます。")
 
             modelAndReasoningPickerRow(
                 model: {
@@ -1547,10 +1563,16 @@ struct SettingsView: View {
                 )
             }
 
-            Button(uiText("モデル一覧を更新")) {
-                refreshModelCatalog()
+            HStack {
+                Button(uiText("モデル一覧を更新")) {
+                    refreshModelCatalog()
+                }
+                .disabled(isRefreshingModels)
+                Button(uiText("保存")) {
+                    saveOptimizationModelSettings()
+                }
+                .disabled(!canSaveOptimizationModelSettings)
             }
-            .disabled(isRefreshingModels)
             helperTextVerbatim(modelCatalogNotice)
         }
     }
@@ -2654,51 +2676,26 @@ struct SettingsView: View {
         )
     }
 
-    private var modelPresetBinding: Binding<String> {
+    private var modelSelectionModeBinding: Binding<String> {
         Binding(
-            get: {
-                switch modelSettingsDraft.mode {
-                case .cli:
-                    return "cli"
-                case .explicit:
-                    if let preset = CodexModelCatalog.builtInPresets.first(where: {
-                        $0.slug == modelSettingsDraft.selectedModelSlug
-                            && $0.effort == modelSettingsDraft.selectedReasoningEffort
-                    }) {
-                        return preset.id
-                    }
-                    return "custom"
-                case .custom:
-                    return "custom"
-                }
-            },
+            get: { modelSettingsDraft.mode == .cli ? "cli" : "custom" },
             set: { value in
                 if value == "cli" {
                     modelSettingsDraft.mode = .cli
                     return
                 }
 
-                if value == "custom" {
-                    if modelSettingsDraft.mode == .cli {
-                        let model = availableModels.first
-                        modelSettingsDraft = CodexModelSettings(
-                            mode: .custom,
-                            selectedModelSlug: model?.slug ?? CodexModelSettings.defaultModelSlug,
-                            selectedReasoningEffort: model?.defaultReasoningLevel ?? CodexModelSettings.defaultReasoningEffort
-                        )
-                    } else {
-                        modelSettingsDraft.mode = .custom
-                        normalizeSelectedReasoning()
-                    }
-                    return
+                if modelSettingsDraft.mode == .cli {
+                    let model = availableModels.first
+                    modelSettingsDraft = CodexModelSettings(
+                        mode: .custom,
+                        selectedModelSlug: model?.slug ?? CodexModelSettings.defaultModelSlug,
+                        selectedReasoningEffort: model?.defaultReasoningLevel ?? CodexModelSettings.defaultReasoningEffort
+                    )
+                } else {
+                    modelSettingsDraft.mode = .custom
+                    normalizeSelectedReasoning()
                 }
-
-                guard let preset = CodexModelCatalog.builtInPresets.first(where: { $0.id == value }) else { return }
-                modelSettingsDraft = CodexModelSettings(
-                    mode: .explicit,
-                    selectedModelSlug: preset.slug,
-                    selectedReasoningEffort: preset.effort
-                )
             }
         )
     }
@@ -2730,11 +2727,11 @@ struct SettingsView: View {
 
     private var optimizationModelBinding: Binding<String> {
         Binding(
-            get: { store.settings.customInstructionOptimizationModelSettings.selectedModelSlug },
+            get: { optimizationModelSettingsDraft.selectedModelSlug },
             set: { slug in
                 let model = optimizationAvailableModels.first { $0.slug == slug }
-                let currentEffort = store.settings.customInstructionOptimizationModelSettings.selectedReasoningEffort
-                store.settings.customInstructionOptimizationModelSettings = CodexModelSettings(
+                let currentEffort = optimizationModelSettingsDraft.selectedReasoningEffort
+                optimizationModelSettingsDraft = CodexModelSettings(
                     mode: .explicit,
                     selectedModelSlug: slug,
                     selectedReasoningEffort: normalizedEffort(for: model, preferred: currentEffort)
@@ -2745,11 +2742,11 @@ struct SettingsView: View {
 
     private var optimizationReasoningBinding: Binding<String> {
         Binding(
-            get: { store.settings.customInstructionOptimizationModelSettings.selectedReasoningEffort },
+            get: { optimizationModelSettingsDraft.selectedReasoningEffort },
             set: { effort in
-                store.settings.customInstructionOptimizationModelSettings = CodexModelSettings(
+                optimizationModelSettingsDraft = CodexModelSettings(
                     mode: .explicit,
-                    selectedModelSlug: store.settings.customInstructionOptimizationModelSettings.selectedModelSlug,
+                    selectedModelSlug: optimizationModelSettingsDraft.selectedModelSlug,
                     selectedReasoningEffort: effort
                 )
             }
@@ -2766,7 +2763,7 @@ struct SettingsView: View {
     /// 既存の最適化モデル設定は勝手に消さず表示だけ維持する。通常/M5の選択肢には混ぜない。
     private var optimizationAvailableModels: [CodexModelInfo] {
         let models = availableModels
-        let optimizationSlug = store.settings.customInstructionOptimizationModelSettings.selectedModelSlug
+        let optimizationSlug = optimizationModelSettingsDraft.selectedModelSlug
             .trimmingCharacters(in: .whitespacesAndNewlines)
         if !optimizationSlug.isEmpty,
            !models.contains(where: { $0.slug == optimizationSlug }) {
@@ -2805,7 +2802,7 @@ struct SettingsView: View {
     }
 
     private var selectedOptimizationModelInfo: CodexModelInfo? {
-        optimizationAvailableModels.first { $0.slug == store.settings.customInstructionOptimizationModelSettings.selectedModelSlug }
+        optimizationAvailableModels.first { $0.slug == optimizationModelSettingsDraft.selectedModelSlug }
     }
 
     private var supportedReasoningLevels: [CodexReasoningLevel] {
@@ -2822,7 +2819,7 @@ struct SettingsView: View {
         if !levels.isEmpty {
             return levels
         }
-        let effort = store.settings.customInstructionOptimizationModelSettings.selectedReasoningEffort
+        let effort = optimizationModelSettingsDraft.selectedReasoningEffort
         return [CodexReasoningLevel(effort: effort.isEmpty ? "medium" : effort, description: "")]
     }
 
@@ -2870,10 +2867,6 @@ struct SettingsView: View {
         modelSettingsDraft.selectedReasoningEffort = normalizedEffort(
             for: selectedModelInfo,
             preferred: modelSettingsDraft.selectedReasoningEffort
-        )
-        store.settings.customInstructionOptimizationModelSettings.selectedReasoningEffort = normalizedEffort(
-            for: selectedOptimizationModelInfo,
-            preferred: store.settings.customInstructionOptimizationModelSettings.selectedReasoningEffort
         )
         let aiModel = aiCommandAvailableModels.first { $0.slug == aiCommandModelSettingsDraft.selectedModelSlug }
         aiCommandModelSettingsDraft.selectedReasoningEffort = normalizedEffort(
@@ -2940,6 +2933,7 @@ struct SettingsView: View {
     }
 
     private func initializeDraftsFromSettings() {
+        optimizationModelSettingsDraft = store.settings.customInstructionOptimizationModelSettings
         customInstructionDraft = store.settings.customInstruction
         handsFreeSendCustomPhraseDraft = store.settings.handsFreeSendSettings.customPhrase
         // 未設定なら最初から入力できる。設定済みならロックした状態で開く。
@@ -3023,6 +3017,23 @@ struct SettingsView: View {
         aiCommandCustomInstructionHistoryCursor = nextIndex
         aiCommandCustomInstructionDraft = history[nextIndex]
         aiCommandCustomInstructionMessage = uiText("保存済み履歴を読み込みました。保存すると反映されます。")
+    }
+
+    private var canSaveOptimizationModelSettings: Bool {
+        OptimizationModelSavePolicy.allowsSave(
+            draft: optimizationModelSettingsDraft,
+            saved: store.settings.customInstructionOptimizationModelSettings,
+            liveModels: fetchedModels,
+            catalogVerified: isModelCatalogVerified,
+            busy: isVoiceProcessing || isOptimizingCustomInstruction || isOptimizingAICommandCustomInstruction,
+            canWrite: store.canSave
+        )
+    }
+
+    private func saveOptimizationModelSettings() {
+        guard canSaveOptimizationModelSettings else { return }
+        store.settings.customInstructionOptimizationModelSettings = optimizationModelSettingsDraft
+        store.flushPendingSave()
     }
 
     private func saveModelSettings() {
@@ -3281,10 +3292,14 @@ struct SettingsView: View {
                     fetchedModels = models
                     isModelCatalogVerified = true
                     if !didResolveInitialModelDefaults {
+                        let optimizationHasEdits = optimizationModelSettingsDraft != store.settings.customInstructionOptimizationModelSettings
                         store.resolveInitialModelDefaults(usingLiveModels: models)
                         modelSettingsDraft = store.settings.modelSettings
                         aiCommandModelSettingsDraft = store.settings.aiCommandSettings.modelSettings
                         aiCommandWebSearchDraft = store.settings.aiCommandSettings.webSearchEnabled
+                        if !optimizationHasEdits {
+                            optimizationModelSettingsDraft = store.settings.customInstructionOptimizationModelSettings
+                        }
                         didResolveInitialModelDefaults = true
                     }
                     normalizeSelectedReasoning()

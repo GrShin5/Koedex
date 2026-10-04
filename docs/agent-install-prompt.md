@@ -22,7 +22,7 @@ and immutable release before it runs any script in the repository.
 ## Pinned source
 
 This version pins the official URL `https://github.com/GrShin5/Koedex.git`, release tag
-`v0.1.9`, and GitHub immutable-release verification.
+`v0.1.10`, and GitHub immutable-release verification.
 
 > **For people updating the public release:** A Git commit SHA is calculated from, among other
 > things, the commit's own contents, so it cannot be written into that same commit in advance.
@@ -70,7 +70,7 @@ need to look for or click, instead of asking me questions that only use engineer
 
 PINNED SOURCE
 - Official URL: https://github.com/GrShin5/Koedex.git
-- Release tag: v0.1.9
+- Release tag: v0.1.10
 - Verification method: GitHub immutable release
 
 WORKING LOCATION
@@ -93,15 +93,15 @@ HOW TO PROCEED
   ZIP download, or installation method.
 
 FETCH AND VERIFY
-1. Clone v0.1.9 into the new destination using a command equivalent to:
-   git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
+1. Clone v0.1.10 into the new destination using a command equivalent to:
+   git clone --branch v0.1.10 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
 2. Before running any repository script, verify all of the following:
    - origin's fetch URL matches https://github.com/GrShin5/Koedex.git
      (you may treat only a trailing .git as equivalent during comparison)
-   - the local v0.1.9 tag's commit exactly equals HEAD
-   - refs/tags/v0.1.9 returned by git ls-remote against the official URL exactly equals HEAD
-   - GitHub's official releases/tags/v0.1.9 API reports tag_name=v0.1.9 and immutable=true
-   - if GitHub CLI is already available, gh release verify v0.1.9 --repo GrShin5/Koedex also succeeds
+   - the local v0.1.10 tag's commit exactly equals HEAD
+   - refs/tags/v0.1.10 returned by git ls-remote against the official URL exactly equals HEAD
+   - GitHub's official releases/tags/v0.1.10 API reports tag_name=v0.1.10 and immutable=true
+   - if GitHub CLI is already available, gh release verify v0.1.10 --repo GrShin5/Koedex also succeeds
    - the checkout is clean and has no untracked files
 3. If any value differs, the release is missing or not immutable, or a value cannot be
    verified, do not run a repository script. Report the values you could verify in a table
@@ -179,7 +179,7 @@ FINAL REPORT
 | 項目 | 固定値 |
 | --- | --- |
 | 公式URL | `https://github.com/GrShin5/Koedex.git` |
-| リリースタグ | `v0.1.9` |
+| リリースタグ | `v0.1.10` |
 | 検証方式 | `GitHub immutable release` |
 
 > **公開版を更新する方へ**：Gitのcommit SHAは、そのcommit自身の本文を含めて計算されるため、
@@ -228,7 +228,7 @@ KoedexというmacOSアプリを、公式GitHubリポジトリから取得して
 
 【固定する取得元】
 - 公式URL: https://github.com/GrShin5/Koedex.git
-- リリースタグ: v0.1.9
+- リリースタグ: v0.1.10
 - 検証方式: GitHub immutable release
 
 【作業場所】
@@ -249,15 +249,15 @@ KoedexというmacOSアプリを、公式GitHubリポジトリから取得して
   独断で切り替えないでください。
 
 【取得と照合】
-1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.9をcloneしてください。
-   git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
+1. 選んだ新規clone先へ、次の内容と等価な方法でv0.1.10をcloneしてください。
+   git clone --branch v0.1.10 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
 2. clone直後、スクリプトを1つも実行する前に、次をすべて確認してください。
    - originのfetch URLが https://github.com/GrShin5/Koedex.git と一致する
      （比較時だけ末尾の.gitの有無を同一視して構いません）
-   - ローカルのv0.1.9 tagが指すcommitとHEADが完全一致する
-   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.9もHEADと完全一致する
-   - GitHub公式APIのreleases/tags/v0.1.9が、tag_name=v0.1.9かつimmutable=trueを返す
-   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.9 --repo GrShin5/Koedexも成功する
+   - ローカルのv0.1.10 tagが指すcommitとHEADが完全一致する
+   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.1.10もHEADと完全一致する
+   - GitHub公式APIのreleases/tags/v0.1.10が、tag_name=v0.1.10かつimmutable=trueを返す
+   - GitHub CLIをすでに利用できる場合は、gh release verify v0.1.10 --repo GrShin5/Koedexも成功する
    - checkoutがcleanで、未追跡ファイルもない
 3. 1つでも一致しない、releaseが存在しない・immutableでない、取得結果を確認できない、
    別refへ誘導された場合は、

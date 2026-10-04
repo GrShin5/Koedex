@@ -945,33 +945,32 @@ Koedex lets you choose an AI [model](#model) for each purpose.
 
 | Section | Used for | Default |
 | --- | --- | --- |
-| AI Assist model selection | Cleanup in Standard mode | On a fresh install: GPT-5.6 Luna / low (falls back to your Codex CLI settings if that can't be fetched) |
-| Model for AI Command mode | Processing in AI Command mode | On a fresh install: GPT-5.6 Luna / low (falls back to your Codex CLI settings if that can't be fetched) |
-| Model used for optimization | Optimizing custom instructions | On a fresh install: GPT-5.6 Luna / low (falls back to your Codex CLI settings if that can't be fetched) |
+| AI Assist model selection | Cleanup in Standard mode | On a fresh install: GPT-6 Luna / low (retains the previous initial settings if unavailable) |
+| Model for AI Command mode | Processing in AI Command mode | On a fresh install: GPT-6 Luna / low (retains the previous initial settings if unavailable) |
+| Model used for optimization | Optimizing custom instructions | On a fresh install: GPT-6 Luna / low (retains the previous initial settings if unavailable) |
 
 #### Models you can choose
 
 The list of selectable models is fetched dynamically from Codex CLI. There's also a
 built-in list as a fallback in case that fetch fails.
 
-Six presets are shown:
+AI Assist's "Model selection method" offers "Custom selection" and "Follow Codex CLI settings".
+With "Custom selection", you choose the model and reasoning effort separately. On a fresh
+install, GPT-6 Luna / low is selected under "Custom selection" when available.
+There are no fixed model presets.
 
-| Display name |
-| --- |
-| GPT-5.6 Luna / low (fast, low-cost) |
-| GPT-5.6 Luna / medium (balanced) |
-| GPT-5.6 Terra / low (light everyday use) |
-| GPT-5.6 Terra / medium (recommended for everyday use) |
-| GPT-5.6 Sol / medium (for complex tasks) |
-| GPT-5.6 Sol / high (highest accuracy) |
+For all three sections, click Save after changing the model or reasoning effort.
+Optimization uses the saved settings. Unsaved optimization model changes are discarded when you close Settings.
 
 [Reasoning effort](#reasoning-effort) can be set to low, medium, high, or xhigh.
+
+The AI model and reasoning effort can affect the wording and finish of cleaned-up text, as well as answers and search approaches in AI Command mode. Results may change even with the same instructions when you switch models or a model is updated. If the result does not meet your expectations, try making your instructions more specific, naming a source when relevant, or using another model or reasoning effort. These steps do not guarantee improvement.
 
 #### Notes
 
 | Note | Detail |
 | --- | --- |
-| Automatic setup on a fresh install | On first connection, Koedex fetches the model list, and if `GPT-5.6 Luna / low` is available, applies it to all three model settings at once. **It never changes the choice of an existing user** |
+| Automatic setup on a fresh install | On first connection, Koedex fetches the model list, and if `GPT-6 Luna / low` is available, applies it to all three model settings at once. **It never changes the choice of an existing user** |
 | If the list can't be fetched | Koedex shows "Could not retrieve the model list. Your saved settings are unchanged. Update the Codex CLI, then refresh the model list again." and **disables the Save button** |
 | Why you can't press Save | This isn't a bug. It's designed to prevent saving a guessed model name that might not actually exist |
 | When you can save | **You can't save while recording or processing** |
@@ -1662,7 +1661,7 @@ update Codex CLI to the latest version.
 #### Timed out waiting for Codex
 
 The response didn't come back in time. Check your internet connection and try again. For
-long passages, switching to a lighter model (for example, GPT-5.6 Luna / low) can help.
+long passages, switching to a lighter model (for example, GPT-6 Luna / low) can help.
 
 #### Codex returned an invalid response
 
@@ -2188,7 +2187,7 @@ need to look for or click, instead of asking me questions that only use engineer
 
 PINNED SOURCE
 - Official URL: https://github.com/GrShin5/Koedex.git
-- Release tag: v0.1.9
+- Release tag: v0.1.10
 - Verification method: GitHub immutable release
 
 WORKING LOCATION
@@ -2211,15 +2210,15 @@ HOW TO PROCEED
   ZIP download, or installation method.
 
 FETCH AND VERIFY
-1. Clone v0.1.9 into the new destination using a command equivalent to:
-   git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
+1. Clone v0.1.10 into the new destination using a command equivalent to:
+   git clone --branch v0.1.10 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
 2. Before running any repository script, verify all of the following:
    - origin's fetch URL matches https://github.com/GrShin5/Koedex.git
      (you may treat only a trailing .git as equivalent during comparison)
-   - the local v0.1.9 tag's commit exactly equals HEAD
-   - refs/tags/v0.1.9 returned by git ls-remote against the official URL exactly equals HEAD
-   - GitHub's official releases/tags/v0.1.9 API reports tag_name=v0.1.9 and immutable=true
-   - if GitHub CLI is already available, gh release verify v0.1.9 --repo GrShin5/Koedex also succeeds
+   - the local v0.1.10 tag's commit exactly equals HEAD
+   - refs/tags/v0.1.10 returned by git ls-remote against the official URL exactly equals HEAD
+   - GitHub's official releases/tags/v0.1.10 API reports tag_name=v0.1.10 and immutable=true
+   - if GitHub CLI is already available, gh release verify v0.1.10 --repo GrShin5/Koedex also succeeds
    - the checkout is clean and has no untracked files
 3. If any value differs, the release is missing or not immutable, or a value cannot be
    verified, do not run a repository script. Report the values you could verify in a table
@@ -2307,12 +2306,12 @@ swift --version
 ### Step 1: Clone the repository
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_EN -->
-Clone only the single point tagged `v0.1.9` from the official repository. Do not take the latest
+Clone only the single point tagged `v0.1.10` from the official repository. Do not take the latest
 state (`main`) — take this release and nothing else. Do not run this where a folder named `Koedex`
 already exists.
 
 ```bash
-git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.1.10 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -2322,7 +2321,7 @@ Inside the folder the clone created, paste and run the following as-is.
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.1.9"
+EXPECTED_TAG="v0.1.10"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -2348,11 +2347,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 If even one ❌ appears, stop there. Do not switch to a different URL, a different tag, a ZIP
 download, a mirror, or any other way of obtaining the source.
 
-A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.9` is published as
+A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.10` is published as
 an immutable release. If you have the GitHub CLI, you can confirm the same thing with:
 
 ```bash
-gh release verify v0.1.9 --repo GrShin5/Koedex
+gh release verify v0.1.10 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_EN -->
 
@@ -2433,8 +2432,8 @@ Once it launches, continue with [6. First-time setup](#6-first-time-setup).
 
 | Item | Detail |
 | --- | --- |
-| Release covered | v0.1.9 |
-| App version covered | 0.1.9 |
+| Release covered | v0.1.10 |
+| App version covered | 0.1.10 |
 | Manual language | English |
 
 This manual was written against the source code in the release above. Newer versions may
@@ -2483,7 +2482,7 @@ use docs/agent-install-prompt.md instead.
 
 PINNED SOURCE
 - Official URL: https://github.com/GrShin5/Koedex.git
-- Release tag: v0.1.9
+- Release tag: v0.1.10
 - Verification method: GitHub immutable release
 
 WORKING LOCATION
@@ -2515,15 +2514,15 @@ STEP 1: SET ASIDE THE CURRENT INSTALL
    An equivalent Finder drag is fine too, but never delete or trash it.
 
 STEP 2: FETCH AND VERIFY THE NEW VERSION
-1. Clone v0.1.9 into the new destination using a command equivalent to:
-   git clone --branch v0.1.9 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
+1. Clone v0.1.10 into the new destination using a command equivalent to:
+   git clone --branch v0.1.10 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
 2. Before running any repository script, verify all of the following:
    - origin's fetch URL matches https://github.com/GrShin5/Koedex.git
      (you may treat only a trailing .git as equivalent during comparison)
-   - the local v0.1.9 tag's commit exactly equals HEAD
-   - refs/tags/v0.1.9 returned by git ls-remote against the official URL exactly equals HEAD
-   - GitHub's official releases/tags/v0.1.9 API reports tag_name=v0.1.9 and immutable=true
-   - if GitHub CLI is already available, gh release verify v0.1.9 --repo GrShin5/Koedex also succeeds
+   - the local v0.1.10 tag's commit exactly equals HEAD
+   - refs/tags/v0.1.10 returned by git ls-remote against the official URL exactly equals HEAD
+   - GitHub's official releases/tags/v0.1.10 API reports tag_name=v0.1.10 and immutable=true
+   - if GitHub CLI is already available, gh release verify v0.1.10 --repo GrShin5/Koedex also succeeds
    - the checkout is clean and has no untracked files
 3. If any value differs, the release is missing or not immutable, or a value cannot be
    verified, do not run a repository script. Report the values you could verify in a table
