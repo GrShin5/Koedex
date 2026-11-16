@@ -195,6 +195,28 @@ enum OnboardingRestartRequestPolicy {
     static func permitsRestart(isQuitting: Bool) -> Bool { !isQuitting }
 }
 
+/// AppKitは`.terminateLater`の間、`-[NSApplication terminate:]`の中の入れ子run loopで
+/// replyを待つ。main dispatch queueのブロック（MainActorのTaskや`DispatchQueue.main.async`）
+/// の中からterminateすると、そのブロックが終わるまで直列のmain queueが止まり、replyを運ぶ
+/// MainActorのjobも動けない。結果、強制終了の締切（約8秒）まで終了しなかった。
+/// run loopのtimerから呼べばmain queueの外でterminateが始まり、replyがすぐ届く。
+/// main queueのブロックやTaskから直接`NSApp.terminate`を呼ばず、必ずここを通すこと。
+enum RunLoopApplicationTermination {
+    /// main queueのブロックではなくrun loopから実行する。メニューを開いている間
+    /// （eventTracking）やモーダル中も止まらないよう、旧実装と同じ範囲のモードで動かす。
+    static let runLoopModes: [RunLoop.Mode] = [.default, .modalPanel, .eventTracking]
+
+    @MainActor
+    static func request(application: NSApplication = NSApp) {
+        application.perform(
+            #selector(NSApplication.terminate(_:)),
+            with: nil,
+            afterDelay: 0,
+            inModes: runLoopModes
+        )
+    }
+}
+
 /// 再開位置を保存し、対話的な確認を停止してから現在のプロセスを終了する。
 @MainActor
 final class OnboardingRestartCoordinator: ObservableObject {
@@ -264,11 +286,7 @@ final class OnboardingRestartCoordinator: ObservableObject {
             }
 
             suspendOnboardingWindow()
-            // AppKitが`.terminateLater`でreplyを待っても、reply側のMainActor Taskが
-            // 起動できるよう、現在のMainActor jobが終わった後に終了を要求する。
-            DispatchQueue.main.async {
-                NSApp.terminate(nil)
-            }
+            RunLoopApplicationTermination.request()
         }
     }
 

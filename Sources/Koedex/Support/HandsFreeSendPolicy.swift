@@ -36,6 +36,7 @@ enum SendKeyStroke: String, Codable, CaseIterable, Hashable {
 /// ハンズフリー送信モードの永続設定。
 /// 外部互換経路での自動送信同意は、既存のAI編集同意とは意図的に分離する。
 struct HandsFreeSendSettings: Codable, Equatable {
+    var fastTierEnabled: Bool = false
     var enabled: Bool
     /// 開始と停止を兼ねる単一のトグルChord。停止専用bindingは持たない。
     var binding: HotkeyBinding
@@ -109,10 +110,12 @@ struct HandsFreeSendSettings: Codable, Equatable {
             historyEnabled: (try? container.decodeIfPresent(Bool.self, forKey: .historyEnabled)) ?? true,
             historyRetentionDays: (try? container.decodeIfPresent(Int.self, forKey: .historyRetentionDays)) ?? 0
         )
+        fastTierEnabled = try container.decodeIfPresent(Bool.self, forKey: .fastTierEnabled) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(fastTierEnabled, forKey: .fastTierEnabled)
         try container.encode(enabled, forKey: .enabled)
         try container.encode(binding, forKey: .binding)
         try container.encode(triggerSource, forKey: .triggerSource)
@@ -124,6 +127,7 @@ struct HandsFreeSendSettings: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case fastTierEnabled
         case enabled, binding, triggerSource, customPhrase, sendKey, allowExternalAutoSend
         case historyEnabled, historyRetentionDays
         /// 旧スキーマからの読み取り専用キー。書き出しはしない。

@@ -36,6 +36,12 @@ enum RegressionTestSuite {
             }
         }
 
+        OnboardingSpeedOptionsRegressionTests.run { condition, name in expect(condition, name) }
+        OnboardingScreenshotModeRegressionTests.run { condition, name in expect(condition, name) }
+        RunLoopApplicationTerminationRegressionTests.run { condition, name in expect(condition, name) }
+        FastTierAllModesRegressionTests.run { condition, name in expect(condition, name) }
+        FastTierRegressionTests.run { condition, name in expect(condition, name) }
+
         func skip(_ name: String) {
             print("SKIP: \(name)")
             skipped.append(name)
@@ -63,6 +69,12 @@ enum RegressionTestSuite {
         }
 
         print("=== Koedex --test-regressions ===")
+        for result in DictationLatencyTraceRegressionTests.run() { expect(result.passed, result.name) }
+        ShortUtteranceRegressionTests.run { expect($0, $1) }
+        AXWriteReliabilityMemoRegressionTests.run { expect($0, $1) }
+        FastTierPauseRegistryRegressionTests.run { expect($0, $1) }
+        ContextualVocabularyRegressionTests.run { expect($0, $1) }
+        ShortUtteranceRegressionTests.run { expect($0, $1) }
 
         expect(CodexErrorClassifier.classify(code: 429) == .rateLimited, "RPC rate limit classification")
         expect(CodexErrorClassifier.classify(code: 402) == .quotaExhausted, "RPC quota classification")
@@ -1786,20 +1798,20 @@ enum RegressionTestSuite {
         )
         expect(
             // 境界の両側を固定する。turn数は12で、経過時間は600秒で作り直す。
-            !CleanupThreadRotationPolicy.shouldRotate(turnCount: 11, threadAgeSeconds: 599)
-                && CleanupThreadRotationPolicy.shouldRotate(turnCount: 12, threadAgeSeconds: 0)
+            !CleanupThreadRotationPolicy.shouldRotate(turnCount: 17, threadAgeSeconds: 599)
+                && CleanupThreadRotationPolicy.shouldRotate(turnCount: 18, threadAgeSeconds: 0)
                 && CleanupThreadRotationPolicy.shouldRotate(turnCount: 0, threadAgeSeconds: 600)
                 && !CleanupThreadRotationPolicy.shouldRotate(turnCount: 0, threadAgeSeconds: nil)
                 && CleanupThreadRotationPolicy.shouldRotate(turnCount: 45, threadAgeSeconds: nil)
-                && CleanupThreadRotationPolicy.maximumTurnsPerThread == 12
+                && CleanupThreadRotationPolicy.maximumTurnsPerThread == 18
                 && CleanupThreadRotationPolicy.maximumThreadAgeSeconds == 600,
             "cleanup thread rotation triggers on turn count or thread age and never on a missing timestamp alone"
         )
         expect(
             // 録音開始時だけ先読み分を足す。整形時の閾値(600秒)が動いていないことも同時に固定する。
-            !CleanupThreadRotationPolicy.shouldRotateBeforeRecording(turnCount: 11, threadAgeSeconds: 569)
+            !CleanupThreadRotationPolicy.shouldRotateBeforeRecording(turnCount: 17, threadAgeSeconds: 569)
                 && CleanupThreadRotationPolicy.shouldRotateBeforeRecording(turnCount: 0, threadAgeSeconds: 570)
-                && CleanupThreadRotationPolicy.shouldRotateBeforeRecording(turnCount: 12, threadAgeSeconds: 0)
+                && CleanupThreadRotationPolicy.shouldRotateBeforeRecording(turnCount: 18, threadAgeSeconds: 0)
                 && !CleanupThreadRotationPolicy.shouldRotateBeforeRecording(turnCount: 0, threadAgeSeconds: nil)
                 && CleanupThreadRotationPolicy.recordingLeadTimeSeconds == 30
                 && !CleanupThreadRotationPolicy.shouldRotate(turnCount: 0, threadAgeSeconds: 599),
@@ -1827,7 +1839,7 @@ enum RegressionTestSuite {
                 && CleanupThreadPrewarmPolicy.decision(
                     requiresSingleUseThreads: false, hasActiveTurn: false, hasThread: true,
                     threadPromptLanguage: .japanese, promptLanguage: .japanese,
-                    turnCount: 12, threadAgeSeconds: 0) == .replaceThread
+                    turnCount: 18, threadAgeSeconds: 0) == .replaceThread
                 && CleanupThreadPrewarmPolicy.decision(
                     requiresSingleUseThreads: false, hasActiveTurn: false, hasThread: true,
                     threadPromptLanguage: .japanese, promptLanguage: .japanese,
@@ -1835,7 +1847,7 @@ enum RegressionTestSuite {
                 && CleanupThreadPrewarmPolicy.decision(
                     requiresSingleUseThreads: false, hasActiveTurn: false, hasThread: true,
                     threadPromptLanguage: .japanese, promptLanguage: .japanese,
-                    turnCount: 11, threadAgeSeconds: 569) == .skip
+                    turnCount: 17, threadAgeSeconds: 569) == .skip
                 && CleanupThreadPrewarmPolicy.decision(
                     requiresSingleUseThreads: false, hasActiveTurn: false, hasThread: true,
                     threadPromptLanguage: .japanese, promptLanguage: .japanese,
@@ -5343,6 +5355,12 @@ enum RegressionTestSuite {
         defer { try? FileManager.default.removeItem(at: storageRootURL) }
 
         try? FileManager.default.createDirectory(at: storageRootURL, withIntermediateDirectories: true)
+        for outcome in HistoryWiringRegressionTests.run() {
+            expect(outcome.passed, outcome.name)
+        }
+        for outcome in HistoryV3RegressionTests.run(storageRootURL: storageRootURL) {
+            expect(outcome.passed, outcome.name)
+        }
         for outcome in StorageRegressionTests.run(storageRootURL: storageRootURL) {
             expect(outcome.passed, outcome.name)
         }
@@ -6093,16 +6111,12 @@ enum RegressionTestSuite {
         let oldLunaStore = SettingsStore(
             storageRootURL: storageRootURL.appendingPathComponent("old-luna-settings", isDirectory: true)
         )
-        let oldLunaDefaults = oldLunaStore.settings
         var oldLuna = liveLuna
         oldLuna.slug = "gpt-5.6-luna"
         expect(
-            oldLunaStore.resolveInitialModelDefaults(usingLiveModels: [oldLuna]) == .retainedExistingDefaults
-                && oldLunaStore.settings.modelSettings == oldLunaDefaults.modelSettings
-                && oldLunaStore.settings.aiCommandSettings.modelSettings == oldLunaDefaults.aiCommandSettings.modelSettings
-                && oldLunaStore.settings.customInstructionOptimizationModelSettings
-                    == oldLunaDefaults.customInstructionOptimizationModelSettings,
-            "old Luna alone does not satisfy the GPT-6 Luna initial default"
+            oldLunaStore.resolveInitialModelDefaults(usingLiveModels: [oldLuna]) == .appliedLuna
+                && oldLunaStore.settings.modelSettings.selectedModelSlug == oldLuna.slug,
+            "old Luna is the fallback initial default when GPT-6 Luna is absent"
         )
         freshStore.flushPendingSave()
         let reloadedFreshStore = SettingsStore(storageRootURL: freshSettingsRoot)

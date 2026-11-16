@@ -6,6 +6,7 @@ enum AICommandRoute: String, Codable {
 }
 
 struct AICommandRequest {
+    var fastTierEnabled: Bool = false
     var spokenInstruction: String
     var selectedText: String?
     var additionalInstruction: String

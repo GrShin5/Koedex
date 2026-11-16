@@ -138,12 +138,12 @@ extended attributes in place, so it does not fix the problem.**
 #### Get the source
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_EN -->
-Clone only the single point tagged `v0.1.10` from the official repository. Do not take the latest
+Clone only the single point tagged `v0.2.0` from the official repository. Do not take the latest
 state (`main`) — take this release and nothing else. Do not run this where a folder named `Koedex`
 already exists.
 
 ```bash
-git clone --branch v0.1.10 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.2.0 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -153,7 +153,7 @@ Inside the folder the clone created, paste and run the following as-is.
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.1.10"
+EXPECTED_TAG="v0.2.0"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -179,11 +179,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 If even one ❌ appears, stop there. Do not switch to a different URL, a different tag, a ZIP
 download, a mirror, or any other way of obtaining the source.
 
-A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.10` is published as
+A tag can be moved later, so also confirm on GitHub's Releases page that `v0.2.0` is published as
 an immutable release. If you have the GitHub CLI, you can confirm the same thing with:
 
 ```bash
-gh release verify v0.1.10 --repo GrShin5/Koedex
+gh release verify v0.2.0 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_EN -->
 
@@ -416,9 +416,10 @@ something rather than just transcribing:
 - **Without a selection**: your spoken instruction is treated as a
   question, answered in a separate window. Web search is available only
   in this path, and the answer lists the specific links it actually used.
-- History for AI command mode stores only the transcribed spoken
-  instruction — never the selected text, the answer, audio, or the links
-  used.
+- History for AI command mode stores the transcribed spoken instruction
+  and, by default, the delivered answer, which may quote the selected or
+  clipboard text. You can turn off answer history in Settings. Audio and
+  the links used are never stored.
 
 ### Hands-free send
 

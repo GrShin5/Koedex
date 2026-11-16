@@ -89,6 +89,8 @@ struct OnboardingView: View {
         String(format: uiText(japanese), locale: uiLanguage.locale, arguments: arguments)
     }
 
+    let screenshotMode: Bool
+
     init(
         permissionManager: PermissionManager,
         settingsStore: SettingsStore,
@@ -98,10 +100,12 @@ struct OnboardingView: View {
         onInitialStepPresented: ((OnboardingStep, Int, Bool) -> Void)? = nil,
         onQuitPreparationCompleted: @escaping () -> Void,
         onFinish: @escaping () -> Void,
-        practiceTranscriptionEngine: TranscriptionEngine? = nil
+        practiceTranscriptionEngine: TranscriptionEngine? = nil,
+        screenshotMode: Bool = false
     ) {
         self.permissionManager = permissionManager
         self.settingsStore = settingsStore
+        self.screenshotMode = screenshotMode
         self.mode = mode
         self.forcedInitialStep = forcedInitialStep
         self.onForcedInitialStepPresented = onForcedInitialStepPresented
@@ -153,7 +157,7 @@ struct OnboardingView: View {
                 .foregroundStyle(.orange)
             }
 
-            if mode.isDebug {
+            if mode.showsDebugUI(screenshotMode: screenshotMode) {
                 Label(
                     mode.isPreview
                         ? uiText("プレビューは権限・マイク・ショートカットを疑似表示します。本番データには触れません。")
@@ -218,6 +222,7 @@ struct OnboardingView: View {
         )
         .onboardingUIScale(uiMetrics)
         .dynamicTypeSize(.xxLarge)
+        .focusedSceneValue(\.onboardingSimulateVoice, simulateVoiceAction)
         .onAppear {
             restoreProgress()
         }
@@ -267,7 +272,7 @@ struct OnboardingView: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: uiMetrics.layout(6)) {
-            Text(currentStep == .language ? "言語を選択 / Choose a language" : mode.title(for: settingsStore.settings.languagePreferences.uiLanguage))
+            Text(currentStep == .language ? "言語を選択 / Choose a language" : mode.title(for: settingsStore.settings.languagePreferences.uiLanguage, screenshotMode: screenshotMode))
                 .font(uiMetrics.font(.title))
                 .bold()
             Text(AppLocalizer.format(
@@ -508,7 +513,7 @@ struct OnboardingView: View {
                     .foregroundStyle(.orange)
             }
 
-            if mode.isPreview {
+            if mode.isPreview && mode.showsDebugUI(screenshotMode: screenshotMode) {
                 HStack {
                     Button(uiText("すべて許可済みにする")) {
                         permissionManager.setAllPreviewStates(.authorized)
@@ -523,7 +528,7 @@ struct OnboardingView: View {
     }
 
     private var accessibilityApplicationName: String {
-        mode.isLiveDebugRehearsal ? "Koedex Debug" : "Koedex"
+        mode.isLiveDebugRehearsal && !screenshotMode ? "Koedex Debug" : "Koedex"
     }
 
     private var runningBundleIdentifier: String {
@@ -556,7 +561,7 @@ struct OnboardingView: View {
                 )
                 if mode.isPreview {
                     LabeledContent(uiText("入力デバイス")) {
-                        Text(uiText("システムのデフォルト（プレビュー）"))
+                        Text(uiText(screenshotMode ? "システムのデフォルト" : "システムのデフォルト（プレビュー）"))
                             .foregroundStyle(.secondary)
                     }
                 } else {
@@ -589,7 +594,7 @@ struct OnboardingView: View {
                             .font(uiMetrics.font(.caption))
                             .foregroundStyle(.secondary)
 
-                        if mode.isPreview {
+                        if mode.isPreview && mode.showsDebugUI(screenshotMode: screenshotMode) {
                             Button(uiText("音声入力ありとして表示")) {
                                 microphoneProbe.simulateVoice()
                             }
@@ -665,12 +670,35 @@ struct OnboardingView: View {
             Text(uiText("通常モードで挿入対象になった出力テキストと必要最小限の履歴メタデータを、このMacだけに保存します。"))
                 .font(uiMetrics.font(.caption))
                 .foregroundStyle(.secondary)
-            Text(uiFormat("保存先: %@", OnboardingRuntimeProfile.historyFileDisplayPath))
+            Text(uiFormat("保存先: %@", (screenshotMode ? OnboardingRuntimeProfile.historyFileDisplayPath(for: .normal) : OnboardingRuntimeProfile.historyFileDisplayPath)))
                 .font(uiMetrics.font(.caption).monospaced())
                 .foregroundStyle(.secondary)
             Text(uiText("「保存しない」は今後の保存を止めるだけで、既存履歴は削除しません。設定画面の「履歴」タブから、個別・選択・全件削除できます。"))
                 .font(uiMetrics.font(.caption))
                 .foregroundStyle(.secondary)
+
+            if OnboardingSpeedOptionsPolicy.showsOptionalToggles(in: mode) {
+                Divider()
+                Text(uiText("AIの処理を速くする（任意）"))
+                    .font(uiMetrics.font(.headline))
+                Text(uiText("どちらも初期状態はオフです。"))
+                    .font(uiMetrics.font(.caption))
+                    .foregroundStyle(.secondary)
+                Toggle(uiText("高速モードをすべてのAIモードで使う"), isOn: fastTierAllModesBinding)
+                Text(uiText("AIの返事が少し速くなります。そのかわり、ChatGPTプランの利用枠を通常より多く使います。対応していないモデルでは自動的にふだんの速さで動きます。あとから設定画面で、モードごとにオン・オフを変えられます。"))
+                    .font(uiMetrics.font(.caption))
+                    .foregroundStyle(.secondary)
+                if settingsStore.settings.fastTierAllModesState == .mixed {
+                    Text(uiText("現在はモードごとに設定されています。オンにすると、すべてのモードでオンになります。"))
+                    .font(uiMetrics.font(.caption))
+                    .foregroundStyle(.secondary)
+                }
+                Toggle(uiText("短い発話はAI整形を省いて即入力する"), isOn: shortUtteranceBinding)
+                    .disabled(!settingsStore.settings.cleanupEnabled)
+                Text(uiText("「了解です」「ありがとう」のような12文字以下の短い言葉は、条件を満たすとAIを通さずにすぐ入力します。句読点などが少し変わることがあります。ハンズフリー送信モードでは使われません。あとから設定画面で変更できます。"))
+                    .font(uiMetrics.font(.caption))
+                    .foregroundStyle(.secondary)
+            }
 
             if handsFreeSendOnboardingIsAvailable {
                 Divider()
@@ -761,7 +789,7 @@ struct OnboardingView: View {
                 Text(uiText("保存されるのは音声指示内容の文字起こしだけです。クリップボードモードも同じAIに指示モードの履歴に「クリップボードモード」として表示します。選択元、クリップボード本文、AIの回答、音声、参照リンクなどは保存されません。通常モードと同じ履歴ファイルにモード別で保存されます。"))
                     .font(uiMetrics.font(.caption))
                     .foregroundStyle(.secondary)
-                Text(uiFormat("保存先: %@", OnboardingRuntimeProfile.historyFileDisplayPath))
+                Text(uiFormat("保存先: %@", (screenshotMode ? OnboardingRuntimeProfile.historyFileDisplayPath(for: .normal) : OnboardingRuntimeProfile.historyFileDisplayPath)))
                     .font(uiMetrics.font(.caption).monospaced())
                     .foregroundStyle(.secondary)
                 Text(uiText("「保存しない」は今後の保存を止めるだけで、既存履歴は削除しません。設定画面の「履歴」タブから、個別・選択・全件削除できます。"))
@@ -849,7 +877,7 @@ struct OnboardingView: View {
             }
         } else {
             VStack(alignment: .leading, spacing: uiMetrics.layout(12)) {
-                if mode.isPreview {
+                if mode.isPreview && mode.showsDebugUI(screenshotMode: screenshotMode) {
                     Text(uiText("最後に、練習画面の見え方を確認"))
                         .font(uiMetrics.font(.headline))
                     Text(uiText("プレビューではマイクや音声認識を使いません。例文を表示して、成功・失敗時の表示を確認できます。"))
@@ -877,7 +905,8 @@ struct OnboardingView: View {
             Button(uiText("文字起こしを試す")) {
                 if mode.isPreview {
                     practiceController.showPreviewExample(
-                        language: settingsStore.settings.languagePreferences.uiLanguage
+                        language: settingsStore.settings.languagePreferences.uiLanguage,
+                        screenshotMode: screenshotMode
                     )
                 } else {
                 practiceController.startLivePractice(
@@ -961,7 +990,7 @@ struct OnboardingView: View {
                 ? "迷った時は、メニューバーまたは設定画面からこのガイドをもう一度開けます。"
                 : "すべての設定は後からKoedexの設定画面で変更できます。"))
                 .foregroundStyle(.secondary)
-            if mode.isDebug {
+            if mode.showsDebugUI(screenshotMode: screenshotMode) {
                 Text(uiText("Debug.appを閉じても本番のKoedex設定・履歴・ログは変更されません。"))
                     .font(uiMetrics.font(.caption))
                     .foregroundStyle(.purple)
@@ -1057,7 +1086,10 @@ struct OnboardingView: View {
         case .welcome: japanese = "通常モード（AIアシスト入力）・AIに指示モード・ハンズフリー送信モードの違いを先に確認します。"
         case .permissions: japanese = "必要な権限だけを、理由と一緒に確認します。"
         case .voice: japanese = "普段の音声入力に使うマイクとショートカットを確認します。"
-        case .preferences: japanese = "録音の安全な停止時間、通常モードの履歴保持期間、ハンズフリー送信モードの設定を確認します。"
+        case .preferences:
+            japanese = OnboardingSpeedOptionsPolicy.showsOptionalToggles(in: mode)
+                ? "録音の安全な停止時間、通常モードの履歴保持期間、AIの処理の速さ、ハンズフリー送信モードの設定を確認します。"
+                : "録音の安全な停止時間、通常モードの履歴保持期間、ハンズフリー送信モードの設定を確認します。"
         case .aiCommand: japanese = "AIに指示モードのON／OFF、Web検索機能のON／OFF、履歴保持期間、起動キーを設定します。"
         case .practice: japanese = "任意の確認です。失敗しても、あとからいつでも試せます。"
         case .complete: japanese = "準備は完了です。"
@@ -1070,9 +1102,7 @@ struct OnboardingView: View {
         case .language:
             return ""
         case .complete:
-            if mode.isGuide { return AppLocalizer.text("閉じる", language: settingsStore.settings.languagePreferences.uiLanguage) }
-            if mode.isDebug { return AppLocalizer.text("Debugメニューへ戻る", language: settingsStore.settings.languagePreferences.uiLanguage) }
-            return AppLocalizer.text("Koedexを開始", language: settingsStore.settings.languagePreferences.uiLanguage)
+            return uiText(mode.completionButtonKey(screenshotMode: screenshotMode))
         default:
             return AppLocalizer.text("次へ", language: settingsStore.settings.languagePreferences.uiLanguage)
         }
@@ -1167,7 +1197,7 @@ struct OnboardingView: View {
         settingsStore.settings.setupProgress.completedStepIDs.insert(OnboardingStep.language.rawValue)
         settingsStore.flushPendingSave()
         DispatchQueue.main.async {
-            NSApp.mainWindow?.title = mode.title(for: language)
+            NSApp.mainWindow?.title = mode.title(for: language, screenshotMode: screenshotMode)
         }
         currentStepIndex = steps.firstIndex(of: .welcome) ?? 0
     }
@@ -1521,6 +1551,24 @@ struct OnboardingView: View {
                 resetMicrophoneCheck()
             }
         )
+    }
+
+    private var simulateVoiceAction: (() -> Void)? {
+        guard mode.isPreview, currentStep == .voice, microphoneCheckState.showsMeter,
+              microphoneCheckState != .confirmed else { return nil }
+        return { microphoneProbe.simulateVoice() }
+    }
+
+    private var fastTierAllModesBinding: Binding<Bool> {
+        Binding(get: { settingsStore.settings.fastTierAllModesState == .allOn }, set: {
+            OnboardingSpeedOptionsPolicy.applyFastTier($0, to: &settingsStore.settings)
+            FastTierPauseRegistry.shared.resetAll()
+        })
+    }
+
+    private var shortUtteranceBinding: Binding<Bool> {
+        Binding(get: { settingsStore.settings.shortUtteranceInstantInsertEnabled },
+                set: { settingsStore.settings.shortUtteranceInstantInsertEnabled = $0 })
     }
 
     private var autoStopBinding: Binding<Int> {
@@ -2058,7 +2106,7 @@ final class OnboardingWindowController: NSObject, NSWindowDelegate {
         )
         let hosting = NSHostingController(rootView: view)
         let window = NSWindow(contentViewController: hosting)
-        window.title = mode.title(for: settingsStore.settings.languagePreferences.uiLanguage)
+        window.title = mode.title(for: settingsStore.settings.languagePreferences.uiLanguage, screenshotMode: view.screenshotMode)
         // 閉じても進捗を保持してメニューバーから再開できるため、macOS標準の閉じる操作を有効にする。
         window.styleMask = [.titled, .closable, .resizable]
         window.setContentSize(NSSize(

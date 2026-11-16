@@ -179,6 +179,8 @@ enum AsyncRegressionTests {
         results += await codexRequestTerminals()
         results += await cleanupClientGeneration()
         results += await cleanupRecordingPrewarmCancellation()
+        results += await FastTierRetryRegressionTests.run()
+        results += await CleanupFailFastRegressionTests.run()
         results += await aiExecutionLeaseBeforeTurnID()
         results += await aiExecutionLeaseDuringTurnStart()
         results += await aiExecutionLeaseWithTurnID()

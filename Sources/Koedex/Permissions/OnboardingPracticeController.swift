@@ -120,10 +120,10 @@ final class OnboardingPracticeController: ObservableObject {
         }
     }
 
-    func showPreviewExample(language: AppLanguage) {
+    func showPreviewExample(language: AppLanguage, screenshotMode: Bool = false) {
         resultText = language == .japanese
-            ? "これはセットアップ画面のプレビューです。"
-            : "This is a preview of the setup screen."
+            ? (screenshotMode ? "明日の会議は午後3時からです。" : "これはセットアップ画面のプレビューです。")
+            : (screenshotMode ? "The meeting tomorrow starts at 3 p.m." : "This is a preview of the setup screen.")
         audioLevel = 0
         recordingStartedAt = nil
         state = .finished

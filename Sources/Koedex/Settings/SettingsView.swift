@@ -172,7 +172,7 @@ private enum HistoryRetentionScope {
         case .handsFreeSend:
             japanese = "ハンズフリー送信モード（出力履歴）"
         case .aiCommand:
-            japanese = "AIに指示モード（指示文の履歴）"
+            japanese = "AIに指示モード（指示と回答の履歴）"
         }
         return AppLocalizer.text(japanese, language: language)
     }
@@ -279,6 +279,7 @@ struct SettingsView: View {
     @StateObject private var keyCaptureMonitor = HotkeyCaptureMonitor()
     @State private var microphones: [MicrophoneDevice] = []
     @State private var defaultMicrophoneName = ""
+    @State private var hasLiveCleanupCatalog = false
     @State private var fetchedModels: [CodexModelInfo] = CodexModelCatalog.builtInModels
     @State private var isRefreshingModels = false
     @State private var isModelCatalogVerified = false
@@ -723,6 +724,13 @@ struct SettingsView: View {
             Toggle(uiText("AIアシスト"), isOn: $store.settings.cleanupEnabled)
                 .toggleStyle(.switch)
             helperText("オン：フィラー除去・句読点補正等、AIによる文章整形を行ってから挿入します。オフ：音声認識した結果をそのまま即挿入します。")
+
+            VStack(alignment: .leading) {
+                Toggle(uiText("短い発話はAI整形を省いて即入力する（12文字以下・言いよどみ無し）"), isOn: $store.settings.shortUtteranceInstantInsertEnabled)
+                    .toggleStyle(.switch)
+                helperText("句読点が通常のAI整形と少し異なる場合があります。")
+            }
+            .disabled(!store.settings.cleanupEnabled)
         }
     }
 
@@ -857,6 +865,7 @@ struct SettingsView: View {
     private var normalModelSettingsSection: some View {
         settingsSection {
             sectionTitle("AIアシストのモデル選択")
+            fastTierBulkControl
             helperText("この設定はKoedex内のAIアシストにだけ使われ、Codex CLI全体の設定は変更しません。")
             helperText("新規インストール時は、モデル一覧で利用可能な場合にGPT-6 Luna/low がデフォルトとして設定されます。")
 
@@ -889,6 +898,33 @@ struct SettingsView: View {
                 }
             }
 
+            if hasLiveCleanupCatalog || store.settings.cleanupFastTierEnabled {
+                if shouldShowFastTier(enabled: store.settings.cleanupFastTierEnabled, modelSettings: modelSettingsDraft) {
+                    Toggle(uiText("高速モード（利用枠の消費が増えます）"), isOn: Binding(
+                        get: { store.settings.cleanupFastTierEnabled },
+                        set: { enabled in
+                            store.settings.cleanupFastTierEnabled = enabled
+                        }
+                    ))
+                    .disabled(isSavingModelSettings || !SettingsActionSafetyPolicy.allowsReconfiguration(phase: appState.phase))
+                    helperText("利用できない場合は自動的に通常モードへ戻ります。")
+                }
+                if CleanupModelRecommendation.shouldShow(settings: modelSettingsDraft, models: fetchedModels),
+                   let recommended = CleanupModelRecommendation.model(in: fetchedModels) {
+                    HStack {
+                        Text(uiLanguage == .japanese
+                            ? "より速い推奨設定があります：\(recommended.slug) / low"
+                            : "A faster recommended setting is available: \(recommended.slug) / low")
+                            .font(uiMetrics.font(.caption))
+                        Button(uiText("適用")) {
+                            modelSettingsDraft = CodexModelSettings(mode: .custom, selectedModelSlug: recommended.slug, selectedReasoningEffort: "low")
+                            saveModelSettings()
+                        }
+                        .disabled(isSavingModelSettings || !SettingsActionSafetyPolicy.allowsReconfiguration(phase: appState.phase))
+                    }
+                }
+            }
+
             helperTextVerbatim(modelCatalogNotice)
 
             ViewThatFits(in: .horizontal) {
@@ -908,6 +944,74 @@ struct SettingsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
             }
+        }
+    }
+
+    private func shouldShowFastTier(enabled: Bool, modelSettings: CodexModelSettings) -> Bool {
+        enabled || modelSupportsFastTier(modelSettings)
+    }
+
+    private func modelSupportsFastTier(_ modelSettings: CodexModelSettings) -> Bool {
+        hasLiveCleanupCatalog && fetchedModels.contains {
+            $0.supportsFastTier && (modelSettings.mode == .cli || $0.slug == modelSettings.selectedModelSlug)
+        }
+    }
+
+    /// 一括オンは、モデル一覧で対応を確認できたモードだけをオンにする（非対応モードは変更しない）。
+    /// 一覧を取得できていない場合は従来どおり全モードへ適用し、非対応なら各エンジンが自動で通常に戻す。
+    private func applyFastTierToAllModes(_ enabled: Bool) {
+        if enabled, hasLiveCleanupCatalog {
+            let settings = store.settings
+            if modelSupportsFastTier(settings.modelSettings) {
+                store.settings.cleanupFastTierEnabled = true
+                store.settings.handsFreeSendSettings.fastTierEnabled = true
+            }
+            if modelSupportsFastTier(settings.aiCommandSettings.modelSettings) {
+                store.settings.aiCommandSettings.fastTierEnabled = true
+            }
+            if modelSupportsFastTier(settings.customInstructionOptimizationModelSettings) {
+                store.settings.customInstructionOptimizationFastTierEnabled = true
+            }
+        } else {
+            store.settings.setFastTierForAllModes(enabled)
+        }
+        FastTierPauseRegistry.shared.resetAll()
+    }
+
+    private var fastTierStatusText: String {
+        switch store.settings.fastTierAllModesState {
+        case .allOn: return uiText("高速モード状態: すべてオン")
+        case .allOff: return uiText("高速モード状態: すべてオフ")
+        case .mixed: return uiText("モードごとに設定中")
+        }
+    }
+
+    private func fastTierBulkButtonDisabled(enabled: Bool) -> Bool {
+        guard SettingsActionSafetyPolicy.allowsReconfiguration(phase: appState.phase) else { return true }
+        switch store.settings.fastTierAllModesState {
+        case .allOn: return enabled
+        case .allOff: return !enabled
+        case .mixed: return false
+        }
+    }
+
+    private var fastTierBulkControl: some View {
+        VStack(alignment: .leading, spacing: uiMetrics.layout(6)) {
+            Text(uiText("高速モードをすべてのモードに一括適用"))
+            HStack {
+                Button(uiText("すべてオン")) {
+                    applyFastTierToAllModes(true)
+                }
+                .disabled(fastTierBulkButtonDisabled(enabled: true))
+                Button(uiText("すべてオフ")) {
+                    applyFastTierToAllModes(false)
+                }
+                .disabled(fastTierBulkButtonDisabled(enabled: false))
+                Text(fastTierStatusText)
+                    .font(uiMetrics.font(.caption))
+                    .foregroundStyle(.secondary)
+            }
+            helperText("高速モードは利用枠の消費が増えます。選んでいるモデルが対応していないモードは変更しません。")
         }
     }
 
@@ -1089,6 +1193,9 @@ struct SettingsView: View {
             Toggle(uiText("AIに指示モード"), isOn: aiCommandEnabledBinding)
                 .toggleStyle(.switch)
             helperText("選択したテキストへの編集指示や質問ができます。また、テキスト選択をせずにAIへの質問も音声で行えます。オフの場合は起動／停止キーは無効になり、変更はできません。")
+            Toggle(uiText("AIに指示の回答も履歴に残す"), isOn: $store.settings.aiCommandSettings.historyStoresOutput)
+                .toggleStyle(.switch)
+            helperText("履歴が有効な場合、挿入またはウィンドウに表示した出力を保存します。パスワード欄など安全な入力でブロックされた本文は保存しません。AIに指示では音声指示を保存し、設定が有効ならAIの回答も保存します。選択テキストとクリップボードの内容は個別には保存しませんが、回答に引用される場合があります。音声と参照リンクは保存しません。")
         }
     }
 
@@ -1109,6 +1216,15 @@ struct SettingsView: View {
     private var handsFreeSendSettingsSection: some View {
         settingsSection {
             sectionTitle("ハンズフリー送信モード")
+            if shouldShowFastTier(enabled: store.settings.handsFreeSendSettings.fastTierEnabled, modelSettings: modelSettingsDraft) {
+                Toggle(uiText("高速モード（利用枠の消費が増えます）"), isOn: Binding(
+                    get: { store.settings.handsFreeSendSettings.fastTierEnabled },
+                    set: { store.settings.handsFreeSendSettings.fastTierEnabled = $0 }
+                ))
+                .disabled(isSavingModelSettings || !SettingsActionSafetyPolicy.allowsReconfiguration(phase: appState.phase))
+                helperText("利用できない場合は自動的に通常モードへ戻ります。")
+            }
+
             Toggle(uiText("ハンズフリー送信モードを有効にする"), isOn: handsFreeSendEnabledBinding)
                 .toggleStyle(.switch)
             helperText("通常モードと同じ文字起こし・AI整形を使います。音声トリガーまたはもう一度起動キーを押すと録音を終了します。本文を安全に挿入でき、送信が許可されている場合だけ、設定した送信キーを自動送信します。送信できた後は取り消せません。")
@@ -1360,6 +1476,18 @@ struct SettingsView: View {
                 helperText("保存済みのモデルは現在利用できません。利用可能なモデルを選び直してください。")
             }
 
+            if shouldShowFastTier(enabled: store.settings.aiCommandSettings.fastTierEnabled, modelSettings: aiCommandModelSettingsDraft) {
+                Toggle(uiText("高速モード（利用枠の消費が増えます）"), isOn: Binding(
+                    get: { store.settings.aiCommandSettings.fastTierEnabled },
+                    set: {
+                        store.settings.aiCommandSettings.fastTierEnabled = $0
+                        FastTierPauseRegistry.shared.reset(.aiCommand)
+                    }
+                ))
+                .disabled(isSavingAICommandModelSettings || !SettingsActionSafetyPolicy.allowsReconfiguration(phase: appState.phase))
+                helperText("利用できない場合は自動的に通常モードへ戻ります。")
+            }
+
             Toggle(uiText("AIへの質問でWeb検索を使用"), isOn: aiCommandWebBinding)
                 .toggleStyle(.switch)
                 .disabled(!aiCommandModelSupportsWeb || isSavingAICommandModelSettings)
@@ -1561,6 +1689,18 @@ struct SettingsView: View {
                     CodexModelCatalog.userFacingDescription(for: selectedOptimizationModelInfo, language: uiLanguage),
                     localize: false
                 )
+            }
+
+            if shouldShowFastTier(enabled: store.settings.customInstructionOptimizationFastTierEnabled, modelSettings: optimizationModelSettingsDraft) {
+                Toggle(uiText("高速モード（利用枠の消費が増えます）"), isOn: Binding(
+                    get: { store.settings.customInstructionOptimizationFastTierEnabled },
+                    set: {
+                        store.settings.customInstructionOptimizationFastTierEnabled = $0
+                        FastTierPauseRegistry.shared.reset(.optimization)
+                    }
+                ))
+                .disabled(isOptimizingCustomInstruction || isOptimizingAICommandCustomInstruction || !SettingsActionSafetyPolicy.allowsReconfiguration(phase: appState.phase))
+                helperText("利用できない場合は自動的に通常モードへ戻ります。")
             }
 
             HStack {
@@ -1831,7 +1971,7 @@ struct SettingsView: View {
                 .frame(maxWidth: 720, alignment: .leading)
 
                 helperText("「保存しない」を選ぶと、そのモードの新しい履歴は保存されません。既存の履歴は削除されないため、消したい場合は「履歴をすべて削除」または各履歴の削除を使ってください。保持期間を短くする場合は、そのモードの古い履歴だけを確認後に削除します。")
-                helperText("通常モードは安全に挿入できた出力本文だけを保存します。ハンズフリー送信モードは、安全に本文を挿入できた出力だけを別に保存します。AIに指示モードは音声指示の文字起こしだけを保存し、クリップボードモードも同じ履歴に「クリップボードモード」として表示します。選択テキスト、クリップボード本文、回答、音声、参照リンクは保存しません。")
+                helperText("履歴が有効な場合、挿入またはウィンドウに表示した出力を保存します。パスワード欄など安全な入力でブロックされた本文は保存しません。AIに指示では音声指示を保存し、設定が有効ならAIの回答も保存します。選択テキストとクリップボードの内容は個別には保存しませんが、回答に引用される場合があります。音声と参照リンクは保存しません。")
             }
 
             settingsSection {
@@ -1938,7 +2078,7 @@ struct SettingsView: View {
             selection: handsFreeSendHistoryRetentionBinding
         )
         retentionPicker(
-            title: "AIに指示モード（指示文の履歴）",
+            title: "AIに指示モード（指示と回答の履歴）",
             selection: aiCommandHistoryRetentionBinding
         )
     }
@@ -1963,7 +2103,9 @@ struct SettingsView: View {
 
     private func historyEntryRow(_ entry: InputHistoryEntry, isSelectionMode: Bool) -> some View {
         let displayText = entry.storedText ?? ""
-        let displayFlags = entry.flags.compactMap { historyDisplayFlagLabel($0) }
+        let displayFlags = entry.flags.filter {
+            !(entry.storedTextKind == InputHistoryStoredTextKind.reviewText && $0 == InputHistoryFlag.needsReview)
+        }.compactMap { historyDisplayFlagLabel($0) }
         let displayContextLabels = historyContextLabels(for: entry)
 
         return VStack(alignment: .leading, spacing: uiMetrics.layout(6)) {
@@ -1995,6 +2137,12 @@ struct SettingsView: View {
                     .textSelection(.enabled)
             }
 
+            if let instruction = entry.spokenInstruction {
+                Text(uiText("指示: ") + instruction)
+                    .font(uiMetrics.font(.caption))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+            }
             Text(displayText)
                 .font(uiMetrics.font(.body))
                 .foregroundStyle(.primary)
@@ -2018,17 +2166,21 @@ struct SettingsView: View {
     }
 
     private func historyContextLabels(for entry: InputHistoryEntry) -> [String] {
+        var extra: [String] = []
+        if entry.insertStatus == InputHistoryInsertStatus.shownInWindow { extra.append(uiText("ウィンドウに表示")) }
+        if entry.storedTextKind == InputHistoryStoredTextKind.reviewText { extra.append(uiText("要確認")) }
+        if entry.storedTextKind == InputHistoryStoredTextKind.aiCommandOutput { extra.append(uiText("AIに指示の回答")) }
         switch entry.mode {
         case InputHistoryMode.voiceInput:
-            return [uiText("通常モード")]
+            return [uiText("通常モード")] + extra
         case InputHistoryMode.handsFreeSend:
-            return [uiText("ハンズフリー送信モード")]
+            return [uiText("ハンズフリー送信モード")] + extra
         case InputHistoryMode.aiCommand:
             var labels = [uiText("AIに指示モード")]
             if entry.aiCommandInputSource == .clipboard {
                 labels.append(uiText("クリップボードモード"))
             }
-            return labels
+            return labels + extra
         default:
             return []
         }
@@ -2036,6 +2188,8 @@ struct SettingsView: View {
 
     private func historyDisplayFlagLabel(_ flag: String) -> String? {
         switch flag {
+        case InputHistoryFlag.needsReview:
+            return uiText("要確認")
         case InputHistoryFlag.cleanupFailed:
             return uiText("AIアシストに失敗")
         case InputHistoryFlag.insertFailed:
@@ -2452,6 +2606,7 @@ struct SettingsView: View {
         return visible.filter { entry in
             guard let text = entry.storedText else { return false }
             return text.localizedCaseInsensitiveContains(query)
+                || (entry.spokenInstruction?.localizedCaseInsensitiveContains(query) ?? false)
         }
     }
 
@@ -3176,7 +3331,8 @@ struct SettingsView: View {
             do {
                 let result = try await optimizer.optimize(
                     customInstruction: currentInstruction,
-                    dictionaryEntries: dictionaryEntries
+                    dictionaryEntries: dictionaryEntries,
+                    fastTier: store.settings.customInstructionOptimizationFastTierEnabled
                 )
                 await optimizer.shutdown()
                 await MainActor.run {
@@ -3223,7 +3379,8 @@ struct SettingsView: View {
             do {
                 let result = try await optimizer.optimize(
                     customInstruction: currentInstruction,
-                    dictionaryEntries: dictionaryEntries
+                    dictionaryEntries: dictionaryEntries,
+                    fastTier: store.settings.customInstructionOptimizationFastTierEnabled
                 )
                 await optimizer.shutdown()
                 await MainActor.run {
@@ -3289,6 +3446,7 @@ struct SettingsView: View {
             do {
                 let models = try await service.fetchModels(settingsExecutablePath: settingsPath.isEmpty ? nil : settingsPath)
                 await MainActor.run {
+                    hasLiveCleanupCatalog = true
                     fetchedModels = models
                     isModelCatalogVerified = true
                     if !didResolveInitialModelDefaults {
@@ -3318,6 +3476,7 @@ struct SettingsView: View {
                 }
             } catch {
                 await MainActor.run {
+                    hasLiveCleanupCatalog = false
                     fetchedModels = CodexModelCatalog.builtInModels
                     isModelCatalogVerified = false
                     normalizeSelectedReasoning()

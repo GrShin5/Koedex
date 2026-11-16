@@ -119,7 +119,15 @@ enum OnboardingPresentationMode: Equatable {
     /// Debug・アップグレード・権限復旧では既存の画面遷移を維持する。
     var opensSettingsAfterFinish: Bool { self == .firstRun }
 
-    func title(for language: AppLanguage) -> String {
+    func showsDebugUI(screenshotMode: Bool) -> Bool { isDebug && !screenshotMode }
+
+    func completionButtonKey(screenshotMode: Bool) -> String {
+        if isGuide { return "閉じる" }
+        return showsDebugUI(screenshotMode: screenshotMode) ? "Debugメニューへ戻る" : "Koedexを開始"
+    }
+
+    func title(for language: AppLanguage, screenshotMode: Bool = false) -> String {
+        if isDebug && screenshotMode { return Self.firstRun.title(for: language) }
         let japanese: String
         switch self {
         case .firstRun: japanese = "Koedexへようこそ"
@@ -266,5 +274,17 @@ enum OnboardingFlow {
         aiEnabled: Bool
     ) -> Bool {
         !mode.isGuide && aiEnabled
+    }
+}
+
+enum OnboardingSpeedOptionsPolicy {
+    static func showsOptionalToggles(in mode: OnboardingPresentationMode) -> Bool {
+        switch mode {
+        case .firstRun, .upgrade, .debugPreview, .debugRehearsal: return true
+        case .permissionRecovery, .guide: return false
+        }
+    }
+    static func applyFastTier(_ enabled: Bool, to settings: inout KoedexSettings) {
+        settings.setFastTierForAllModes(enabled)
     }
 }

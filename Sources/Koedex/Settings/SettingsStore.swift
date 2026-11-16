@@ -4,6 +4,8 @@ import Combine
 /// アプリ設定。~/Library/Application Support/Koedex/settings.json にJSON永続化する。
 struct KoedexSettings: Codable, Equatable {
     var customInstruction: String
+    var shortUtteranceInstantInsertEnabled: Bool = false
+
     var cleanupEnabled: Bool
     var hotkeyKeyCode: UInt16
     /// true: fn・右⌘等の修飾キー系（flagsChanged監視・単独押し検出）
@@ -18,6 +20,8 @@ struct KoedexSettings: Codable, Equatable {
     /// codex実行ファイルの絶対パス。空文字なら自動探索（CodexPathResolver参照）。
     var codexExecutablePath: String
     /// Koedex内のAIアシストで使うCodexモデル設定。CLI追従時はapp-server引数へ出さない。
+    var customInstructionOptimizationFastTierEnabled: Bool = false
+    var cleanupFastTierEnabled: Bool = false
     var modelSettings: CodexModelSettings
     /// 入力履歴・メモリ基盤を有効にする。本文保存はAIアシスト成功時のみ。
     var historyEnabled: Bool
@@ -126,6 +130,7 @@ struct KoedexSettings: Codable, Equatable {
         autoStopSeconds: Int,
         codexExecutablePath: String,
         modelSettings: CodexModelSettings,
+        cleanupFastTierEnabled: Bool = false,
         historyEnabled: Bool,
         historyRetentionDays: Int,
         historyDisplayLimit: Int,
@@ -148,6 +153,7 @@ struct KoedexSettings: Codable, Equatable {
         self.recordingMode = recordingMode
         self.autoStopSeconds = autoStopSeconds
         self.codexExecutablePath = codexExecutablePath
+        self.cleanupFastTierEnabled = cleanupFastTierEnabled
         self.modelSettings = modelSettings
         self.historyEnabled = historyEnabled
         self.historyRetentionDays = historyRetentionDays
@@ -170,6 +176,7 @@ struct KoedexSettings: Codable, Equatable {
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         customInstruction = try container.decodeIfPresent(String.self, forKey: .customInstruction) ?? ""
+        shortUtteranceInstantInsertEnabled = try container.decodeIfPresent(Bool.self, forKey: .shortUtteranceInstantInsertEnabled) ?? false
         cleanupEnabled = try container.decodeIfPresent(Bool.self, forKey: .cleanupEnabled) ?? true
         let decodedSchemaVersion = try container.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
         schemaVersion = decodedSchemaVersion
@@ -198,6 +205,8 @@ struct KoedexSettings: Codable, Equatable {
         // 実行時はeffectiveAutoStopSecondsで必ず安全な値へ制限する。
         autoStopSeconds = try container.decodeIfPresent(Int.self, forKey: .autoStopSeconds) ?? 300
         codexExecutablePath = try container.decodeIfPresent(String.self, forKey: .codexExecutablePath) ?? ""
+        customInstructionOptimizationFastTierEnabled = try container.decodeIfPresent(Bool.self, forKey: .customInstructionOptimizationFastTierEnabled) ?? false
+        cleanupFastTierEnabled = try container.decodeIfPresent(Bool.self, forKey: .cleanupFastTierEnabled) ?? false
         modelSettings = try container.decodeIfPresent(CodexModelSettings.self, forKey: .modelSettings) ?? .default
         historyEnabled = try container.decodeIfPresent(Bool.self, forKey: .historyEnabled) ?? true
         let decodedHistoryRetentionDays = try container.decodeIfPresent(Int.self, forKey: .historyRetentionDays) ?? 0
@@ -276,6 +285,9 @@ struct KoedexSettings: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case customInstructionOptimizationFastTierEnabled
+        case cleanupFastTierEnabled
+        case shortUtteranceInstantInsertEnabled
         case customInstruction, cleanupEnabled, hotkeyKeyCode, hotkeyIsModifier
         case hotkeyModifierMask, recordingMode, autoStopSeconds, codexExecutablePath, modelSettings
         case historyEnabled, historyRetentionDays, historyDisplayLimit, settingsDisplayScale
@@ -398,12 +410,14 @@ struct ExternalAppCompatibilitySettings: Codable, Equatable {
 }
 
 struct AICommandSettings: Codable, Equatable {
+    var fastTierEnabled: Bool = false
     var enabled: Bool
     var startHotkey: HotkeyBinding
     var stopHotkey: HotkeyBinding
     var modelSettings: CodexModelSettings
     var webSearchEnabled: Bool
     var additionalInstruction: String
+    var historyStoresOutput: Bool = true
     var historyEnabled: Bool
     var historyRetentionDays: Int
     var clipboardVariantEnabled: Bool
@@ -466,6 +480,8 @@ struct AICommandSettings: Codable, Equatable {
             clipboardVariantEnabled: try container.decodeIfPresent(Bool.self, forKey: .clipboardVariantEnabled) ?? false,
             clipboardVariantModifier: try container.decodeIfPresent(AICommandClipboardModifier.self, forKey: .clipboardVariantModifier) ?? AICommandSettings.default.clipboardVariantModifier
         )
+        fastTierEnabled = try container.decodeIfPresent(Bool.self, forKey: .fastTierEnabled) ?? false
+        historyStoresOutput = try container.decodeIfPresent(Bool.self, forKey: .historyStoresOutput) ?? true
     }
 
     private static func normalizedRetentionDays(_ days: Int) -> Int {
@@ -752,8 +768,7 @@ final class SettingsStore: ObservableObject {
         var updated = settings
         updated.initialModelDefaultsResolved = true
 
-        guard let luna = CodexModelCatalog.model(slug: "gpt-6-luna", in: models),
-              CodexModelCatalog.isUserSelectable(effort: "low", for: luna) else {
+        guard let luna = CleanupModelRecommendation.model(in: models) else {
             settings = updated
             return .retainedExistingDefaults
         }
@@ -799,4 +814,22 @@ final class SettingsStore: ObservableObject {
 
     /// 設定変更を監視するためのCombine Publisher（HotkeyManagerのtap再作成トリガー等に使う）。
     var settingsPublisher: Published<KoedexSettings>.Publisher { $settings }
+}
+
+
+enum FastTierAllModesState { case allOn, allOff, mixed }
+
+extension KoedexSettings {
+    var fastTierAllModesState: FastTierAllModesState {
+        let flags = [cleanupFastTierEnabled, handsFreeSendSettings.fastTierEnabled,
+                     aiCommandSettings.fastTierEnabled, customInstructionOptimizationFastTierEnabled]
+        return flags.allSatisfy { $0 } ? .allOn : (flags.allSatisfy { !$0 } ? .allOff : .mixed)
+    }
+
+    mutating func setFastTierForAllModes(_ enabled: Bool) {
+        cleanupFastTierEnabled = enabled
+        handsFreeSendSettings.fastTierEnabled = enabled
+        aiCommandSettings.fastTierEnabled = enabled
+        customInstructionOptimizationFastTierEnabled = enabled
+    }
 }

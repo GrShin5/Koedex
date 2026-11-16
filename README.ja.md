@@ -113,11 +113,11 @@ Claude CodeまたはCodex CLIに貼り付けるだけで導入できます。
 #### ソースを取得する
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_JA -->
-公式リポジトリから、リリース `v0.1.10` の一点だけを clone します。最新の状態（`main`）ではなく、
+公式リポジトリから、リリース `v0.2.0` の一点だけを clone します。最新の状態（`main`）ではなく、
 この版だけを取得してください。`Koedex` という名前のフォルダが既にある場所では実行しないでください。
 
 ```bash
-git clone --branch v0.1.10 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.2.0 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -127,7 +127,7 @@ clone してできたフォルダの中で、以下をそのまま貼り付け�
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.1.10"
+EXPECTED_TAG="v0.2.0"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -153,11 +153,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 ❌ が1つでも出たら、そこで中止してください。別のURL、別のタグ、ZIPダウンロード、ミラーなど、
 別の取得方法へ切り替えないでください。
 
-タグはあとから移動されうるため、GitHub の Releases 画面で `v0.1.10` が immutable release として
+タグはあとから移動されうるため、GitHub の Releases 画面で `v0.2.0` が immutable release として
 公開されていることも確認してください。GitHub CLI を使える場合は、次のコマンドでも確認できます。
 
 ```bash
-gh release verify v0.1.10 --repo GrShin5/Koedex
+gh release verify v0.2.0 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_JA -->
 
@@ -353,8 +353,9 @@ tccutil reset Accessibility com.koedex.app
   含まれている可能性があるためです。
 - **選択がない場合**：話した指示はAIへの質問として扱われ、回答は別ウィンドウに表示されます。
   Web検索はこの経路でのみ利用でき、回答には実際に参照した具体的なリンクが表示されます。
-- 「AIに指示」の履歴には、確定した音声指示の文字起こしだけが保存されます。選択した文章、回答、
-  音声、参照リンクは保存されません。
+- 「AIに指示」の履歴には、確定した音声指示の文字起こしと、初期設定では届けたAIの回答も保存されます。
+  回答には選択した文章やクリップボードの内容が引用される場合があります。回答の保存は設定画面でオフにできます。
+  音声と参照リンクは保存されません。
 
 ### ハンズフリー送信
 

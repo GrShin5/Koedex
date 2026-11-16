@@ -456,7 +456,7 @@ actor CodexAppServerClient {
                     "title": "Koedex",
                 // アプリ版数を名乗る。`scripts/make_app.sh` のCFBundleShortVersionStringと
                 // 一緒に上げること。バンドル外実行でもnilにならないよう定数で持つ。
-                "version": "0.1.10",
+                "version": "0.2.0",
                 ],
                 "capabilities": [
                     "experimentalApi": false,
@@ -603,6 +603,43 @@ actor CodexAppServerClient {
             logger.warning("[CodexAppServerClient] ephemeral threadを確認できなかったためturn/startを中止")
             throw CodexClientError.ephemeralNotConfirmed
         }
+    }
+
+    private var fastTierDisabled = false
+    private var lastFastTierEnabled: Bool?
+    private var fastTierResetGeneration = 0
+
+    func pauseFastTier() {
+        guard !fastTierDisabled else { return }
+        fastTierDisabled = true
+        AppLog.shared.warn("[CodexAppServerClient] 高速tierを停止しました")
+    }
+
+    func sendTurn(params: [String: Any], fastTier: Bool, timeoutSeconds: Double,
+                  resetGeneration: Int = 0, trackSettingChanges: Bool = false,
+                  cancellationMode: CodexRequestCancellationMode = .legacy) async throws -> [String: Any] {
+        if fastTierResetGeneration != resetGeneration || (trackSettingChanges && lastFastTierEnabled != fastTier) {
+            fastTierResetGeneration = resetGeneration
+            fastTierDisabled = false
+            lastFastTierEnabled = fastTier
+        }
+        let enabled = fastTier && !fastTierDisabled
+        let deadline = Date().addingTimeInterval(timeoutSeconds)
+        do {
+            var response = try await sendRequest("turn/start",
+                params: FastTierTurnPolicy.params(params, enabled: enabled),
+                timeoutSeconds: timeoutSeconds, cancellationMode: cancellationMode)
+            response["_koedexFastTier"] = enabled
+            return response
+        } catch {
+            guard enabled, let rpcError = error as? CodexClientError,
+                  case .rpcError(_, let kind) = rpcError, kind == .other, !Task.isCancelled else { throw error }
+            pauseFastTier()
+        }
+        let remaining = deadline.timeIntervalSinceNow
+        guard remaining > 0 else { throw CodexClientError.timeout }
+        return try await sendRequest("turn/start", params: params,
+                                    timeoutSeconds: remaining, cancellationMode: cancellationMode)
     }
 
     @discardableResult

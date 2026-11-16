@@ -80,7 +80,7 @@
 "設定画面、メニューバー、オンボーディング、HUDなどの表示言語です。" = "Used for Settings, the menu bar, onboarding, the HUD, and other app UI.";
 "対応する音声モデルを準備してから切り替えます。切り替えまでしばらく時間がかかります。録音中・処理中は変更できません。" = "The matching speech model is prepared before switching. This can take a while. It cannot be changed while recording or processing.";
 "音声モデルを準備しています…" = "Preparing the speech model…";
-"AIアシストが有効な通常モードと「AIに指示」の両方に適用します。音声で明示した出力言語の指定が常に優先されます。" = "Applies to normal mode when AI Assist is on and to AI Command. An explicit output-language request in speech always takes priority.";
+"AIアシストが有効な通常モードと「AIに指示」の両方に適用します。音声で明示した出力言語の指定が常に優先されます。" = "Applies to Standard mode when AI Assist is on and to AI Command. An explicit output-language request in speech always takes priority.";
 "録音または処理が完了してから音声認識言語を変更してください。" = "Finish recording or processing before changing the speech-recognition language.";
 "音声認識言語を変更できませんでした。権限と音声モデルを確認して、もう一度試してください。" = "Could not change the speech-recognition language. Check permissions and the speech model, then try again.";
 "音声認識エンジンを初期化できませんでした。権限と音声モデルを確認して、もう一度試してください。" = "Could not initialize speech recognition. Check permissions and the speech model, then try again.";
@@ -834,3 +834,65 @@
 "復旧方法を確認" = "Review recovery options";
 
 "安全用バックアップの保存を再試行" = "Retry saving the safety backup";
+
+/* History output */
+"直前の原文をコピー" = "Copy Last Original Transcript";
+"AIに指示の回答も履歴に残す" = "Keep AI command answers in history";
+"回答には選択テキストやクリップボードの内容が含まれる場合があります。" = "Answers may include text from the selection or clipboard.";
+"指示: " = "Instruction: ";
+"ウィンドウに表示" = "Shown in window";
+"要確認" = "Needs review";
+"AIに指示の回答" = "AI command answer";
+"AIに指示モード（指示と回答の履歴）" = "AI command mode (instructions and answers)";
+"履歴が有効な場合、挿入またはウィンドウに表示した出力を保存します。パスワード欄など安全な入力でブロックされた本文は保存しません。AIに指示では音声指示を保存し、設定が有効ならAIの回答も保存します。選択テキストとクリップボードの内容は個別には保存しませんが、回答に引用される場合があります。音声と参照リンクは保存しません。" = "When history is enabled, output inserted or shown in a window is saved. Text blocked by Secure Input, including password fields, is not saved. AI Command saves your spoken instruction and, if enabled, the AI answer. Selected text and clipboard contents are not saved as separate items, but the answer may quote them. Audio and reference links are not saved.";
+"AI整形の高速モード（利用枠の消費が増えます）" = "Fast mode for AI cleanup (uses more of your plan's quota)";
+"利用できない場合は自動的に通常モードへ戻ります。" = "Automatically falls back to standard mode if unavailable.";
+"適用" = "Apply";
+
+"短い発話はAI整形を省いて即入力する（12文字以下・言いよどみ無し）" = "Insert short phrases instantly without AI cleanup (12 characters or fewer, no fillers)";
+"句読点が通常のAI整形と少し異なる場合があります。" = "Punctuation may differ slightly from normal AI cleanup.";
+
+"高速モード（利用枠の消費が増えます）" = "Fast mode (uses more of your plan's quota)";
+
+"高速モードをすべてのモードに一括適用" = "Apply fast mode to all modes";
+
+"すべてオン" = "Turn all on";
+
+"すべてオフ" = "Turn all off";
+
+"モードごとに設定中" = "Set per mode";
+
+"高速モードは利用枠の消費が増えます。" = "Fast mode uses more of your plan's quota.";
+"高速モードは利用枠の消費が増えます。選んでいるモデルが対応していないモードは変更しません。" = "Fast mode uses more of your plan's quota. Modes whose selected model does not support it are left unchanged.";
+
+"高速モード状態: すべてオン" = "All on";
+
+"高速モード状態: すべてオフ" = "All off";
+
+"AIの処理を速くする（任意）" = "Faster AI processing (optional)";
+
+"どちらも初期状態はオフです。" = "Both are off by default.";
+
+"高速モードをすべてのAIモードで使う" = "Use Fast mode in all AI modes";
+
+"AIの返事が少し速くなります。そのかわり、ChatGPTプランの利用枠を通常より多く使います。対応していないモデルでは自動的にふだんの速さで動きます。あとから設定画面で、モードごとにオン・オフを変えられます。" = "AI responses come back a little faster. In exchange, it uses more of your ChatGPT plan's quota than usual. Models that don't support it automatically run at normal speed. You can turn it on or off for each mode later in Settings.";
+
+"現在はモードごとに設定されています。オンにすると、すべてのモードでオンになります。" = "Currently set per mode. Turning this on enables it for every mode.";
+
+"短い発話はAI整形を省いて即入力する" = "Insert short phrases instantly without AI cleanup";
+
+"「了解です」「ありがとう」のような12文字以下の短い言葉は、条件を満たすとAIを通さずにすぐ入力します。句読点などが少し変わることがあります。ハンズフリー送信モードでは使われません。あとから設定画面で変更できます。" = "Short phrases of 12 characters or fewer, like \"Got it\" or \"Thanks\", are inserted right away without AI when they meet the conditions. Punctuation may differ slightly. Not used in hands-free send mode. You can change this later in Settings.";
+
+"撮影用表示（本番と同じ見た目）" = "Screenshot view (same look as the release app)";
+
+"オンにしてからプレビューまたは実機確認を開くと、Debug用の表示を隠し、本番と同じ見た目で表示します。設定には保存されません。マイク確認は ⌘⇧V で「音声あり」にでき、⌘⇧D でDebugメニューへ戻れます。" = "Turn this on, then open the preview or the device test: Debug-only elements are hidden so it looks like the release app. Not saved to settings. On the microphone step press ⌘⇧V to show voice as detected; press ⌘⇧D to return to the Debug menu.";
+
+"高速モード" = "Fast mode";
+
+"短い発話の即入力" = "Short utterance instant insert";
+
+"オン" = "On";
+
+"オフ" = "Off";
+
+"録音の安全な停止時間、通常モードの履歴保持期間、AIの処理の速さ、ハンズフリー送信モードの設定を確認します。" = "Review the safe automatic recording stop time, Standard mode history retention, AI processing speed, and Hands-free send mode settings.";

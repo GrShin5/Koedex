@@ -505,6 +505,7 @@ final class TranscriptionEngine: ObservableObject {
     /// 戻り値は、この録音セッションのtranscriberに対応する最適フォーマット。
     func startStreaming(
         streamID: UUID = UUID(),
+        contextualVocabulary: [String] = [],
         onPartialText: ((UUID, String, Bool) -> Void)? = nil
     ) async throws -> AVAudioFormat? {
         guard activeReconfigurationLease == nil else {
@@ -563,6 +564,19 @@ final class TranscriptionEngine: ObservableObject {
         try await checkStartLease(lease, streamID: streamID, point: .startAfterFormat)
 
         let analyzer = prepared?.analyzer ?? SpeechAnalyzer(modules: [transcriber])
+        // 辞書の適用完了は待たず、準備済み・新規のどちらも認識開始と並行して進める。
+        if !contextualVocabulary.isEmpty {
+            Task {
+                let context = AnalysisContext()
+                context.contextualStrings[.general] = contextualVocabulary
+                do {
+                    try await analyzer.setContext(context)
+                } catch {
+                    // エラーに辞書の内容が含まれる可能性があるため、詳細は記録しない。
+                    AppLog.shared.error("[TranscriptionEngine] 音声認識の辞書適用に失敗")
+                }
+            }
+        }
         let runtime = StreamingRuntime(
             streamID: streamID,
             diagnostics: diagnostics,

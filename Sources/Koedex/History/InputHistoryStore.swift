@@ -116,6 +116,49 @@ final class InputHistoryStore: ObservableObject {
         return .saved
     }
 
+    /// セッションIDで重複を除外して追記する。
+    /// 壊れた行を含む履歴でも、従来の`append`と同じく末尾への追記は続ける（既存行は書き換えない）。
+    /// 全体の書き換え（upgrade・状態更新・prune）は従来どおり壊れた履歴では拒否される。
+    @discardableResult
+    func recordOutput(_ entry: InputHistoryEntry, retentionDays: Int) -> MutationResult {
+        guard !entries.contains(where: { $0.id == entry.id }) else { return .saved }
+        return append(entry, retentionDays: retentionDays)
+    }
+
+    @discardableResult
+    func upgradeAICommandEntry(
+        id: UUID, output: String, spokenInstruction: String?, status: String, retentionDays: Int
+    ) -> MutationResult {
+        guard allowsRewrite else { return fail(.blockedByMalformedHistory) }
+        guard let index = entries.firstIndex(where: { $0.id == id }) else {
+            return .saved
+        }
+        guard entries[index].mode == InputHistoryMode.aiCommand,
+              entries[index].storedTextKind == InputHistoryStoredTextKind.aiCommandTranscript else { return .saved }
+        var candidate = entries
+        candidate[index].storedText = output
+        candidate[index].storedTextKind = InputHistoryStoredTextKind.aiCommandOutput
+        candidate[index].spokenInstruction = spokenInstruction
+        candidate[index].insertStatus = status
+        candidate[index].schemaVersion = InputHistoryEntry.currentSchemaVersion
+        guard candidate[index].isValidForStorage else { return fail(.failed) }
+        if retentionDays > 0,
+           let cutoff = Calendar.current.date(byAdding: .day, value: -retentionDays, to: Date()) {
+            candidate.removeAll { $0.mode == InputHistoryMode.aiCommand && $0.createdAt < cutoff }
+        }
+        return rewriteAndPublish(candidate)
+    }
+
+    @discardableResult
+    func updateInsertStatus(id: UUID, status: String) -> MutationResult {
+        guard allowsRewrite else { return fail(.blockedByMalformedHistory) }
+        guard let index = entries.firstIndex(where: { $0.id == id }),
+              entries[index].insertStatus != status else { return .saved }
+        var candidate = entries
+        candidate[index].insertStatus = status
+        return rewriteAndPublish(candidate)
+    }
+
     func visibleEntries(limit: Int) -> [InputHistoryEntry] { visibleEntries(limit: limit, mode: InputHistoryMode.all) }
     func visibleEntries(limit: Int, mode: String) -> [InputHistoryEntry] {
         let filtered = mode == InputHistoryMode.all ? entries : entries.filter { $0.mode == mode }

@@ -25,6 +25,13 @@ struct CodexModelInfo: Codable, Hashable, Identifiable {
     /// 対応する検索ツール種別（例: web_search）。CLIが返さない場合はnil。
     var webSearchToolType: String?
 
+    struct ServiceTier: Codable, Hashable { var id: String }
+    var serviceTiers: [ServiceTier]? = nil
+    var additionalSpeedTiers: [String]? = nil
+    var supportsFastTier: Bool {
+        serviceTiers?.contains { $0.id == CleanupModelRecommendation.fastServiceTier } == true
+            || additionalSpeedTiers?.contains(CleanupModelRecommendation.fastServiceTier) == true
+    }
     var id: String { slug }
 
     init(
@@ -49,6 +56,8 @@ struct CodexModelInfo: Codable, Hashable, Identifiable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        serviceTiers = try? container.decodeIfPresent([ServiceTier].self, forKey: .serviceTiers)
+        additionalSpeedTiers = try? container.decodeIfPresent([String].self, forKey: .additionalSpeedTiers)
         slug = try container.decode(String.self, forKey: .slug)
         displayName = try container.decodeIfPresent(String.self, forKey: .displayName) ?? slug
         description = try container.decodeIfPresent(String.self, forKey: .description) ?? ""
@@ -62,6 +71,8 @@ struct CodexModelInfo: Codable, Hashable, Identifiable {
     }
 
     private enum CodingKeys: String, CodingKey {
+        case serviceTiers = "service_tiers"
+        case additionalSpeedTiers = "additional_speed_tiers"
         case slug
         case displayName = "display_name"
         case description
@@ -395,5 +406,21 @@ struct CodexModelCatalogService {
             throw CodexModelCatalogError.invalidJSON
         }
         return data.subdata(in: start..<data.count)
+    }
+}
+
+/// ライブ一覧だけを渡して初期値・推奨表示を共通判定する。
+enum CleanupModelRecommendation {
+    static let fallbackChain = ["gpt-6-luna", "gpt-5.6-luna"]
+    // CLIスキーマでは文字列のみ。実機での設定値検証は別途必要。
+    static let fastServiceTier = "priority"
+    static func model(in models: [CodexModelInfo]) -> CodexModelInfo? {
+        fallbackChain.compactMap { slug in models.first { $0.slug == slug } }
+            .first { CodexModelCatalog.isUserSelectable(effort: "low", for: $0) }
+    }
+    static func shouldShow(settings: CodexModelSettings, models: [CodexModelInfo]) -> Bool {
+        guard let recommended = model(in: models) else { return false }
+        return settings.mode == .cli || settings.selectedModelSlug != recommended.slug
+            || settings.selectedReasoningEffort != "low"
     }
 }

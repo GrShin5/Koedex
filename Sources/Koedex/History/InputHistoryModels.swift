@@ -1,6 +1,7 @@
 import Foundation
 
 enum InputHistoryFlag {
+    static let needsReview = "needs_review"
     static let cleanupFailed = "cleanup_failed"
     static let insertFailed = "insert_failed"
     static let secureInputBlocked = "secure_input_blocked"
@@ -11,6 +12,8 @@ enum InputHistoryFlag {
 }
 
 enum InputHistoryStoredTextKind {
+    static let aiCommandOutput = "ai_command_output"
+    static let reviewText = "review_text"
     static let aiAssistedOutput = "ai_assisted_output"
     static let rawTranscriptOutput = "raw_transcript_output"
     static let aiCommandTranscript = "ai_command_transcript"
@@ -25,6 +28,7 @@ enum InputHistoryMode {
 }
 
 enum InputHistoryInsertStatus {
+    static let shownInWindow = "shown_in_window"
     static let inserted = "inserted"
     static let pasteSentUnverified = "paste_sent_unverified"
     static let secureInputBlocked = "secure_input_blocked"
@@ -33,7 +37,7 @@ enum InputHistoryInsertStatus {
 }
 
 struct InputHistoryEntry: Codable, Identifiable, Equatable {
-    static let currentSchemaVersion = 2
+    static let currentSchemaVersion = 3
 
     var id: UUID
     var createdAt: Date
@@ -48,8 +52,10 @@ struct InputHistoryEntry: Codable, Identifiable, Equatable {
     var reasoningEffort: String?
     var latencyMs: Int?
     /// AIに指示の入力元。値を持つ場合でも保存するのは経路ラベルだけで、
-    /// 選択本文・クリップボード本文・回答・URL・音声は保存しない。
+    /// 選択本文・クリップボード本文・URL・音声は保存しない。
+    /// 回答は呼び出し側が保存を選んだ場合だけ保持する。
     var aiCommandInputSource: AICommandInputSource?
+    var spokenInstruction: String?
     var schemaVersion: Int
 
     init(
@@ -66,6 +72,7 @@ struct InputHistoryEntry: Codable, Identifiable, Equatable {
         reasoningEffort: String?,
         latencyMs: Int?,
         aiCommandInputSource: AICommandInputSource? = nil,
+        spokenInstruction: String? = nil,
         schemaVersion: Int = InputHistoryEntry.currentSchemaVersion
     ) {
         self.id = id
@@ -81,6 +88,7 @@ struct InputHistoryEntry: Codable, Identifiable, Equatable {
         self.reasoningEffort = reasoningEffort
         self.latencyMs = latencyMs
         self.aiCommandInputSource = aiCommandInputSource
+        self.spokenInstruction = spokenInstruction
         self.schemaVersion = schemaVersion
     }
 
@@ -88,7 +96,7 @@ struct InputHistoryEntry: Codable, Identifiable, Equatable {
         flags.contains(InputHistoryFlag.excludedByUser)
     }
 
-    /// 「AIに指示」の履歴は音声指示の確定文字起こしだけを保持する。
+    /// この旧形式の履歴は音声指示の確定文字起こしだけを保持する。
     /// 選択元・回答・URL・音声をこのAPIへ渡せない形にして保存境界を狭める。
     static func aiCommandTranscript(
         _ transcript: String,
@@ -114,9 +122,26 @@ struct InputHistoryEntry: Codable, Identifiable, Equatable {
         )
     }
 
+    /// 回答の保存は呼び出し側が判断する。入力元の本文や音声は受け取らない。
+    static func aiCommandOutput(
+        output: String, spokenInstruction: String?, status: String,
+        id: UUID = UUID(), createdAt: Date = Date(),
+        inputSource: AICommandInputSource? = nil, modelSlug: String? = nil,
+        reasoningEffort: String? = nil, latencyMs: Int? = nil
+    ) -> InputHistoryEntry {
+        InputHistoryEntry(
+            id: id, createdAt: createdAt, mode: InputHistoryMode.aiCommand,
+            storedText: output, storedTextKind: InputHistoryStoredTextKind.aiCommandOutput,
+            cleanupEnabled: false, cleanupSucceeded: false, insertStatus: status,
+            flags: [], modelSlug: modelSlug, reasoningEffort: reasoningEffort,
+            latencyMs: latencyMs, aiCommandInputSource: inputSource,
+            spokenInstruction: spokenInstruction
+        )
+    }
+
     var isValidForStorage: Bool {
         guard mode == InputHistoryMode.aiCommand else { return true }
-        guard storedTextKind == InputHistoryStoredTextKind.aiCommandTranscript,
+        guard [InputHistoryStoredTextKind.aiCommandTranscript, InputHistoryStoredTextKind.aiCommandOutput].contains(storedTextKind),
               let storedText else { return false }
         return !storedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }

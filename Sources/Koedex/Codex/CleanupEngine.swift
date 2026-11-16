@@ -5,13 +5,19 @@ private let logger = Logger(subsystem: "com.koedex.app", category: "CleanupEngin
 
 enum CleanupError: Error, LocalizedError {
     case timeout
+    case offline
+    case turnFailed
+    case turnEndedWithoutAnswer
     case emptyResult
     case unsafeOutput
     case underlying(Error)
 
     var errorDescription: String? {
         switch self {
+        case .offline: return "ネットワークに接続されていないためAI整形を省略しました"
         case .timeout: return "整形処理がタイムアウトしました"
+        case .turnFailed: return "整形処理が中断または失敗しました"
+        case .turnEndedWithoutAnswer: return "整形結果が届かず処理が終了しました"
         case .emptyResult: return "整形結果が空でした"
         case .unsafeOutput: return "整形結果の安全性を確認できませんでした"
         case .underlying: return "整形処理でエラーが発生しました"
@@ -56,18 +62,18 @@ enum CleanupTurnCorrelationPolicy {
 ///
 /// **AGENTS.mdの「CleanupEngineのthread使い回し＋起動フラグ — 整形レイテンシ2.2秒を保つ根拠」
 /// に反しない。** 条項の目的はレイテンシを短く保つことで、thread使い回しはその手段である。
-/// 実機ログ（2026-07-30）では1本のthreadで45turnを62分使い回した結果、整形時間が
-/// 1.2秒 → 6.40秒へ悪化した（前半中央値1.9秒、後半中央値3.2秒）。一方 `thread/start` の
-/// 実測は0.14〜0.22秒しかない。**0.2秒払って4秒を避ける取引**なので、レイテンシ目標に資する。
-/// app-serverプロセスの使い回しと起動フラグは一切変更していない。作り直すのはthreadだけである。
+/// 同じthreadを使い続けても数turnでは整形時間は伸びず、新規threadには初回コストがかかる。
+/// 再利用を18turnまで延ばし、最終成功から600秒の休止と作成から1800秒で更新する。
 enum CleanupThreadRotationPolicy {
     /// 実機ログではturn 1〜18がおおむね1.2〜3.0秒で、悪化が顕著になるのはturn 30以降だった。
-    /// 12は余裕を持たせた保守的な値。
-    static let maximumTurnsPerThread = 12
-    /// turn数が少なくても、長時間開いたthreadは同様に重くなるため時間側にも上限を置く。
+    static let maximumTurnsPerThread = 18
+    /// 最終成功（未使用なら作成）からの休止時間。
     static let maximumThreadAgeSeconds: TimeInterval = 600
 
-    static func shouldRotate(turnCount: Int, threadAgeSeconds: TimeInterval?) -> Bool {
+    static let maximumLifetimeSeconds: TimeInterval = 1800
+
+    static func shouldRotate(turnCount: Int, threadAgeSeconds: TimeInterval?, absoluteAgeSeconds: TimeInterval? = nil) -> Bool {
+        if let absoluteAgeSeconds, absoluteAgeSeconds >= maximumLifetimeSeconds { return true }
         if turnCount >= maximumTurnsPerThread { return true }
         if let threadAgeSeconds, threadAgeSeconds >= maximumThreadAgeSeconds { return true }
         return false
@@ -79,13 +85,14 @@ enum CleanupThreadRotationPolicy {
     /// 発話が終わる頃には期限を超えていて、結局利用者を待たせて作り直すことになる。
     /// 実機ログの録音長はp25=3.8秒・p50=7.5秒なので、この先読みが無いと
     /// 先回りの効果が大きく削がれる。**`shouldRotate`自体は変更しない**ので、
-    /// 整形時の閾値は12turn / 600秒のまま。
+    /// 整形時の閾値は18turn / 休止600秒 / 寿命1800秒。
     static let recordingLeadTimeSeconds: TimeInterval = 30
 
-    static func shouldRotateBeforeRecording(turnCount: Int, threadAgeSeconds: TimeInterval?) -> Bool {
+    static func shouldRotateBeforeRecording(turnCount: Int, threadAgeSeconds: TimeInterval?, absoluteAgeSeconds: TimeInterval? = nil) -> Bool {
         shouldRotate(
             turnCount: turnCount,
-            threadAgeSeconds: threadAgeSeconds.map { $0 + recordingLeadTimeSeconds }
+            threadAgeSeconds: threadAgeSeconds.map { $0 + recordingLeadTimeSeconds },
+            absoluteAgeSeconds: absoluteAgeSeconds.map { $0 + recordingLeadTimeSeconds }
         )
     }
 }
@@ -109,7 +116,8 @@ enum CleanupThreadPrewarmPolicy {
         threadPromptLanguage: AppLanguage?,
         promptLanguage: AppLanguage,
         turnCount: Int,
-        threadAgeSeconds: TimeInterval?
+        threadAgeSeconds: TimeInterval?,
+        absoluteAgeSeconds: TimeInterval? = nil
     ) -> Decision {
         // 使い捨てthread運用では先回りしても次のcleanupが捨てるだけ。
         if requiresSingleUseThreads { return .skip }
@@ -119,7 +127,8 @@ enum CleanupThreadPrewarmPolicy {
         if threadPromptLanguage != promptLanguage { return .replaceThread }
         if CleanupThreadRotationPolicy.shouldRotateBeforeRecording(
             turnCount: turnCount,
-            threadAgeSeconds: threadAgeSeconds
+            threadAgeSeconds: threadAgeSeconds,
+            absoluteAgeSeconds: absoluteAgeSeconds
         ) { return .replaceThread }
         return .skip
     }
@@ -176,6 +185,16 @@ actor CleanupEngine {
     private var client: CodexAppServerClient
     /// 設定で指定されたCodex CLIパス（nilまたは空文字なら自動探索: CodexPathResolver参照）。
     private var executablePath: String?
+    private var fastTierEnabled = false
+    private var fastTierDisabled = false
+    private var fastTierResetGeneration = 0
+    /// 高速tier指定中に続いた整形失敗の回数。tierの拒否がturn単位の失敗として届き、
+    /// エラー文から判別できない場合でも、整形が失敗し続ける状態に留まらないための保険。
+    private var consecutiveFailuresWithFastTier = 0
+    static let fastTierFailureLimit = 2
+    private var effectiveServiceTier: String? {
+        fastTierEnabled && !fastTierDisabled ? CleanupModelRecommendation.fastServiceTier : nil
+    }
     private var modelSettings: CodexModelSettings
     private var threadId: String?
     /// thread開始時に固定した開発者指示の言語。STT言語が変わればthreadを作り直す。
@@ -187,6 +206,7 @@ actor CleanupEngine {
     /// `CleanupThreadRotationPolicy`で作り直しの判断に使う。
     private var threadTurnCount = 0
     private var threadStartedAt: Date?
+    private var threadLastSucceededAt: Date?
     /// 失敗後のthread再準備は利用者待機とは切り離す。新しいcleanupが始まったら
     /// generationを進め、古いbackground taskはthreadを採用できない。
     private var recoveryGeneration = 0
@@ -246,11 +266,29 @@ actor CleanupEngine {
     /// 既存クライアントが起動中の場合は呼び出し側で再起動が必要（SettingsView側に注記あり）。
     func updateExecutablePath(_ path: String?) {
         self.executablePath = path
+        resetFastTierFailures()
     }
 
     /// 設定変更（モデル指定）を反映する。既存app-serverにはホットスワップせず、再試行/再起動後に適用する。
     func updateModelSettings(_ settings: CodexModelSettings) {
         self.modelSettings = settings
+        resetFastTierFailures()
+    }
+
+    func updateFastTierEnabled(_ enabled: Bool) {
+        fastTierEnabled = enabled
+        resetFastTierFailures()
+    }
+
+    func resetFastTierFailures() {
+        fastTierResetGeneration &+= 1
+        fastTierDisabled = false
+        consecutiveFailuresWithFastTier = 0
+    }
+
+    private func disableFastTier() {
+        fastTierDisabled = true
+        AppLog.shared.warn("[CleanupEngine] 高速tierを停止し、次回から通常速度で実行します")
     }
 
     static func promptResourceName(for language: AppLanguage) -> String {
@@ -341,7 +379,8 @@ actor CleanupEngine {
             threadPromptLanguage: threadPromptLanguage,
             promptLanguage: promptLanguage,
             turnCount: threadTurnCount,
-            threadAgeSeconds: currentThreadAgeSeconds
+            threadAgeSeconds: currentThreadAgeSeconds,
+            absoluteAgeSeconds: currentThreadAbsoluteAgeSeconds
         )
         guard decision != .skip else { return false }
 
@@ -379,9 +418,8 @@ actor CleanupEngine {
     /// 載る余地を無くすため。clientが落ちていれば何もせず降り、次のcleanupが今までどおり
     /// その場で起動し直す。
     ///
-    /// awaitを含まないので、判断とtask生成はactor上で原子的に行われる。
     /// 先回りが不要な通常ケース（実測で約75%）ではTaskすら作らない。
-    func prepareThreadForRecording(promptLanguage: AppLanguage, correlationID: String) {
+    func prepareThreadForRecording(promptLanguage: AppLanguage, correlationID: String) async {
         let decision = CleanupThreadPrewarmPolicy.decision(
             requiresSingleUseThreads: requiresSingleUseThreads,
             hasActiveTurn: activeTurnCount > 0,
@@ -389,7 +427,8 @@ actor CleanupEngine {
             threadPromptLanguage: threadPromptLanguage,
             promptLanguage: promptLanguage,
             turnCount: threadTurnCount,
-            threadAgeSeconds: currentThreadAgeSeconds
+            threadAgeSeconds: currentThreadAgeSeconds,
+            absoluteAgeSeconds: currentThreadAbsoluteAgeSeconds
         )
         guard decision != .skip else { return }
         // 取消が先に届いていたsessionの発火要求は捨てる（到着順は保証されない）。
@@ -487,9 +526,9 @@ actor CleanupEngine {
         clientStartupTask = nil
         clientStartupToken = nil
         clientGeneration &+= 1
-        await client.stop()
-        // 再接続後に停止前のthread IDを再利用しない。
+        // await前に停止対象の状態を片付け、再入した呼出しのthreadを消さない。
         clearThread()
+        await client.stop()
     }
 
     /// ユーザーが「AI処理をリセット」を押した時に、蓄積したthreadを明示的に捨てる。
@@ -511,6 +550,7 @@ actor CleanupEngine {
         threadPromptLanguage = promptLanguage
         threadTurnCount = 0
         threadStartedAt = Date()
+        threadLastSucceededAt = nil
     }
 
     private func clearThread() {
@@ -518,9 +558,14 @@ actor CleanupEngine {
         threadPromptLanguage = nil
         threadTurnCount = 0
         threadStartedAt = nil
+        threadLastSucceededAt = nil
     }
 
     private var currentThreadAgeSeconds: TimeInterval? {
+        (threadLastSucceededAt ?? threadStartedAt).map { Date().timeIntervalSince($0) }
+    }
+
+    private var currentThreadAbsoluteAgeSeconds: TimeInterval? {
         threadStartedAt.map { Date().timeIntervalSince($0) }
     }
 
@@ -554,6 +599,7 @@ actor CleanupEngine {
         }
         let startedAt = Date()
         let newClient = CodexAppServerClient(executablePath: executablePath, modelSettings: modelSettings)
+        resetFastTierFailures()
         self.client = newClient
         clientGeneration &+= 1
         let observedClientGeneration = clientGeneration
@@ -607,6 +653,7 @@ actor CleanupEngine {
     ) {
         guard observedGeneration == clientGeneration, client === observedClient else { return }
         logger.info("[CleanupEngine] codex app-serverが終了しました(status=\(status))。次回呼び出し時に再起動します")
+        resetFastTierFailures()
         clearThread()
     }
 
@@ -645,7 +692,8 @@ actor CleanupEngine {
         mode: CleanupMode = .voiceTranscript,
         promptLanguage: AppLanguage = .japanese,
         outputLanguage: OutputLanguageResolution? = nil,
-        correlationID: String? = nil
+        correlationID: String? = nil,
+        fastTier: Bool = false
     ) async throws -> String {
         let deadline = CleanupOperationDeadline(duration: operationTimeoutSeconds)
         let operationID = correlationID ?? String(UUID().uuidString.prefix(8))
@@ -673,13 +721,15 @@ actor CleanupEngine {
             if threadId != nil,
                CleanupThreadRotationPolicy.shouldRotate(
                    turnCount: threadTurnCount,
-                   threadAgeSeconds: currentThreadAgeSeconds
+                   threadAgeSeconds: currentThreadAgeSeconds,
+                   absoluteAgeSeconds: currentThreadAbsoluteAgeSeconds
                ) {
                 AppLog.shared.info(String(
-                    format: "[CleanupEngine] threadを作り直します（id=%@ turn=%d, threadAge=%.0f秒）",
+                    format: "[CleanupEngine] threadを作り直します（id=%@ turn=%d idleSec=%.0f threadAgeSec=%.0f）",
                     operationID,
                     threadTurnCount,
-                    currentThreadAgeSeconds ?? 0
+                    currentThreadAgeSeconds ?? 0,
+                    currentThreadAbsoluteAgeSeconds ?? 0
                 ))
                 clearThread()
             }
@@ -709,7 +759,8 @@ actor CleanupEngine {
                 threadId: threadId,
                 prompt: prompt,
                 timeoutSeconds: try deadline.remainingOrThrow(),
-                operationID: operationID
+                operationID: operationID,
+                fastTier: fastTier
             )
             let sanitized = Self.postProcessCleanupResult(rawTranscript: rawTranscript, result: result)
             guard AppServerOutputSafetyGate.accepts(
@@ -723,16 +774,19 @@ actor CleanupEngine {
             ) else {
                 throw CleanupError.unsafeOutput
             }
+            let idleSeconds = currentThreadAgeSeconds ?? 0
             if self.threadId == threadId {
                 threadTurnCount += 1
+                threadLastSucceededAt = Date()
             }
             AppLog.shared.info(String(
-                format: "[CleanupEngine] complete id=%@ elapsedMs=%.0f outputChars=%d turn=%d threadAgeSec=%.0f",
+                format: "[CleanupEngine] complete id=%@ elapsedMs=%.0f outputChars=%d turn=%d idleSec=%.0f threadAgeSec=%.0f",
                 operationID,
                 deadline.elapsed * 1_000,
                 sanitized.count,
                 threadTurnCount,
-                currentThreadAgeSeconds ?? 0
+                idleSeconds,
+                currentThreadAbsoluteAgeSeconds ?? 0
             ))
             if requiresSingleUseThreads, self.threadId == threadId {
                 clearThread()
@@ -756,6 +810,29 @@ actor CleanupEngine {
         }
     }
 
+    private func recordFastTierFailure(_ error: CleanupError, carriedTier: Bool) {
+        guard carriedTier, !fastTierDisabled, CleanupFastTierFallbackPolicy.countsAsFailure(error) else { return }
+        consecutiveFailuresWithFastTier += 1
+        if CleanupFastTierFallbackPolicy.shouldDisable(consecutiveFailures: consecutiveFailuresWithFastTier) {
+            disableFastTier()
+        }
+    }
+
+    private func recordFastTierSuccess() { consecutiveFailuresWithFastTier = 0 }
+
+    func debugFastTierFailureForTest(_ error: CleanupError) {
+        recordFastTierFailure(error, carriedTier: effectiveServiceTier != nil)
+    }
+    func debugFastTierSuccessForTest(carriedTier: Bool = true) { if carriedTier { recordFastTierSuccess() } }
+    var debugFastTierState: (failures: Int, disabled: Bool) {
+        (consecutiveFailuresWithFastTier, fastTierDisabled)
+    }
+
+    private static func isCodexNotFound(_ error: Error) -> Bool {
+        if let error = error as? CodexClientError, case .codexNotFound = error { return true }
+        return false
+    }
+
     static func normalizedError(_ error: Error) -> CleanupError {
         if let cleanupError = error as? CleanupError {
             return cleanupError
@@ -766,7 +843,10 @@ actor CleanupEngine {
     /// 計測ログへサーバ応答本文・パス・URLを混ぜないための分類名。
     private static func telemetryFailureName(_ error: CleanupError) -> String {
         switch error {
+        case .offline: return "offline"
         case .timeout: return "timeout"
+        case .turnFailed: return "turn_failed"
+        case .turnEndedWithoutAnswer: return "turn_ended_without_answer"
         case .emptyResult: return "empty_result"
         case .unsafeOutput: return "unsafe_output"
         case .underlying(let inner): return "underlying_\(String(describing: type(of: inner)))"
@@ -1080,7 +1160,7 @@ actor CleanupEngine {
         return body.contains("。") || body.contains(". ") || body.contains("．") || body.contains("！") || body.contains("？")
     }
 
-    private static func isLikelyCompleteUtterance(_ text: String) -> Bool {
+    static func isLikelyCompleteUtterance(_ text: String) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return false }
         let completeJapaneseEndings = [
@@ -1115,7 +1195,8 @@ actor CleanupEngine {
         threadId: String,
         prompt: String,
         timeoutSeconds: Double,
-        operationID: String
+        operationID: String,
+        fastTier: Bool = false
     ) async throws -> String {
         activeTurnCount += 1
         defer { activeTurnCount -= 1 }
@@ -1123,19 +1204,26 @@ actor CleanupEngine {
             threadId: threadId,
             prompt: prompt,
             timeoutSeconds: timeoutSeconds,
-            operationID: operationID
+            operationID: operationID,
+            fastTier: fastTier
         )
     }
 
+    /// 回帰テスト専用。偽transportで`runTurn`の終了通知と猶予の扱いを確かめる。
+    func debugRunTurnForLifecycleTest() async throws -> String {
+        try await runTurnHoldingLease(threadId: "test-thread", prompt: "test", timeoutSeconds: 15, operationID: "test")
+    }
+
     /// turn/start を送り、item/completed(final_answer) の本文を待って完了とする。
-    /// turn/completed が先に届いても、通知順序の前後に備えて全体タイムアウトまでは final_answer を待つ。
+    /// turn/completed が先に届いても、通知順序の前後に備えて500msだけ final_answer を待つ。
     /// タイムアウトした場合は呼び出し元でthreadIdをnilにリセットし、次回は新規threadを使う
     /// （このメソッドは常に自分がsubscribeしたstreamをdeferでunsubscribeし、購読リークを防ぐ）。
     private func runTurn(
         threadId: String,
         prompt: String,
         timeoutSeconds: Double,
-        operationID: String
+        operationID: String,
+        fastTier: Bool = false
     ) async throws -> String {
         let startedAt = Date()
         let deadline = Date().addingTimeInterval(timeoutSeconds)
@@ -1145,7 +1233,7 @@ actor CleanupEngine {
         }
 
         let requestStartedAt = Date()
-        let response = try await client.sendRequest("turn/start", params: [
+        let response = try await client.sendTurn(params: [
             "threadId": threadId,
             "input": [
                 [
@@ -1156,7 +1244,9 @@ actor CleanupEngine {
             ],
             "sandboxPolicy": ["type": "readOnly", "networkAccess": false],
             "approvalPolicy": "never",
-        ], timeoutSeconds: timeoutSeconds)
+        ], fastTier: fastTier && !fastTierDisabled, timeoutSeconds: timeoutSeconds,
+           resetGeneration: fastTierResetGeneration, trackSettingChanges: false)
+        let carriedTier = response["_koedexFastTier"] as? Bool == true
         let turn = response["turn"] as? [String: Any]
         let turnId = turn?["id"] as? String
         let turnStartElapsed = Date().timeIntervalSince(requestStartedAt)
@@ -1171,6 +1261,7 @@ actor CleanupEngine {
         guard remaining > 0 else { throw CleanupError.timeout }
         let timeoutNanoseconds = UInt64(remaining * 1_000_000_000)
 
+        let grace = CleanupAnswerGrace()
         do {
             let completion = try await withThrowingTaskGroup(of: TurnCompletion.self) { group in
                 defer { group.cancelAll() }
@@ -1216,10 +1307,21 @@ actor CleanupEngine {
                             throw CleanupError.emptyResult
                         }
 
-                        // turn/completed が先に届くことがあるため、ここでは完了扱いにしない。
-                        // final_answer が来るまで待つか、全体タイムアウトで失敗させる。
+                        if notification.method == "turn/completed" {
+                            let status = (nestedTurn?["status"] as? String)?.lowercased()
+                            if status == "failed" || status == "interrupted" {
+                                throw CleanupError.turnFailed
+                            }
+                            await grace.begin()
+                        }
                     }
                     throw CleanupError.timeout
+                }
+                group.addTask {
+                    while true {
+                        try await Task.sleep(nanoseconds: 50_000_000)
+                        if await grace.expired { throw CleanupError.turnEndedWithoutAnswer }
+                    }
                 }
                 group.addTask {
                     try await Task.sleep(nanoseconds: timeoutNanoseconds)
@@ -1239,8 +1341,10 @@ actor CleanupEngine {
                 // turn数と経過秒を「現在のthread」として報告してしまう。
                 clearThread()
             }
+            if carriedTier { recordFastTierSuccess() }
             return completion.text
         } catch {
+            if !Task.isCancelled { recordFastTierFailure(Self.normalizedError(error), carriedTier: carriedTier) }
             throw error
         }
     }
@@ -1249,5 +1353,32 @@ actor CleanupEngine {
 extension CodexAppServerClient {
     func setOnProcessExit(_ handler: @escaping @Sendable (Int32) -> Void) {
         self.onProcessExit = handler
+    }
+}
+
+/// 通知購読と猶予タイマー間で最初の終了通知時刻だけを共有する。
+private actor CleanupAnswerGrace {
+    private var endedAt: ContinuousClock.Instant?
+    func begin() { if endedAt == nil { endedAt = .now } }
+    var expired: Bool {
+        guard let endedAt else { return false }
+        return endedAt.duration(to: .now) >= .milliseconds(500)
+    }
+}
+
+/// 高速tierを自動で止める条件。純関数にして境界を回帰テストで固定する。
+enum CleanupFastTierFallbackPolicy {
+    static func countsAsFailure(_ error: CleanupError) -> Bool {
+        switch error {
+        case .turnFailed, .turnEndedWithoutAnswer: return true
+        case .underlying(let inner):
+            if let clientError = inner as? CodexClientError, case .rpcError = clientError { return true }
+            return false
+        default: return false
+        }
+    }
+
+    static func shouldDisable(consecutiveFailures: Int) -> Bool {
+        consecutiveFailures >= CleanupEngine.fastTierFailureLimit
     }
 }

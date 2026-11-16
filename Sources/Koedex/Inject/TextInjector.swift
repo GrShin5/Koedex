@@ -189,6 +189,7 @@ enum InvisibleCharacterSanitizer {
 @MainActor
 final class TextInjector {
     private let scopedClipboardTextTransport = ScopedClipboardTextTransport()
+    private let axWriteReliabilityMemo = AXWriteReliabilityMemo()
 
     func restorePendingScopedClipboardIfOwned() {
         scopedClipboardTextTransport.restorePendingClipboardIfOwned()
@@ -220,7 +221,8 @@ final class TextInjector {
         verificationDestination destination: InsertionDestination?,
         allowExternalCompatibility: Bool = false,
         allowScopedClipboardFallback: Bool = false,
-        allowUnverifiedMultilineText: Bool = true
+        allowUnverifiedMultilineText: Bool = true,
+        allowAXSkipMemo: Bool = false
     ) async -> NormalTextInsertionOutcome {
         guard !IsSecureEventInputEnabled() else {
             return NormalTextInsertionOutcome(
@@ -281,8 +283,33 @@ final class TextInjector {
             )
         }
 
+        // 欄の分類は公開されていないため、本文を含まないbundle IDだけで記憶する。
+        let memoKey = target.bundleIdentifier.map { AXWriteReliabilityMemo.Key(bundleIdentifier: $0) }
+        guard !Task.isCancelled else {
+            return NormalTextInsertionOutcome(result: .insertionUnconfirmed, sendEligibility: .notEligible)
+        }
+        if let memoKey,
+           axWriteReliabilityMemo.shouldSkipDirectAXWrite(
+            memoKey,
+            allowAXSkipMemo: allowAXSkipMemo,
+            allowExternalCompatibility: allowExternalCompatibility
+           ) {
+            AppLog.shared.info("AX書込みをスキップ（このアプリでは反映されないため）")
+            let outcome = await submitExternalText(
+                text,
+                normalTarget: target,
+                destination: destination,
+                allowExternalCompatibility: allowExternalCompatibility,
+                allowScopedClipboardFallback: allowScopedClipboardFallback,
+                allowUnverifiedMultilineText: allowUnverifiedMultilineText
+            )
+            axWriteReliabilityMemo.recordSkippedSubmission(outcome.result, for: memoKey)
+            return outcome
+        }
+
         switch destination.replaceSelection(with: text) {
         case .inserted:
+            if allowAXSkipMemo, let memoKey { axWriteReliabilityMemo.record(.inserted, for: memoKey) }
             return NormalTextInsertionOutcome(
                 result: .inserted,
                 sendEligibility: .directAXVerified
@@ -317,12 +344,14 @@ final class TextInjector {
                 }
                 switch destination.reconfirmInsertion(of: text) {
                 case .matched:
+                    if allowAXSkipMemo, let memoKey { axWriteReliabilityMemo.record(.matched, for: memoKey) }
                     AppLog.shared.info("AX書込みは遅延して反映されました（再確認\(attempt + 1)回目で一致）")
                     return NormalTextInsertionOutcome(
                         result: .inserted,
                         sendEligibility: .directAXVerified
                     )
                 case .unchanged where attempt == reconfirmDelays.count - 1:
+                    if allowAXSkipMemo, let memoKey { axWriteReliabilityMemo.record(.unchangedAtFinalAttempt, for: memoKey) }
                     // 互換入力の同意が無いなら縮退しない。`pasteStaticText`は
                     // `.externalCompatibilityDisabled`を返すため、AXが完備した欄に対して
                     // 「ブラウザやElectronアプリでは…」という的外れな案内が出てしまう。

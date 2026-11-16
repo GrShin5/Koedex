@@ -4,13 +4,8 @@ import AppKit
 /// `Koedex Debug.app` の入口。通常アプリのメニューバー処理・Codex接続を起動せず、
 /// 初回セットアップだけを安全に確認できる。
 struct OnboardingDebugLauncherView: View {
-    private enum Destination {
-        case preview
-        case rehearsal
-    }
-
     @ObservedObject var settingsStore: SettingsStore
-    @State private var destination: Destination?
+    @ObservedObject var presentation: OnboardingDebugPresentationState
     @StateObject private var permissionResetController = DebugPermissionResetController()
     @State private var showsPermissionResetConfirmation = false
     @State private var showsFreshSetupResetConfirmation = false
@@ -29,16 +24,16 @@ struct OnboardingDebugLauncherView: View {
 
     var body: some View {
         Group {
-            switch destination {
-            case .preview:
-                OnboardingDebugPreviewHost(settingsStore: settingsStore) {
-                    destination = nil
+            switch presentation.mode {
+            case .debugPreview:
+                OnboardingDebugPreviewHost(settingsStore: settingsStore, screenshotMode: presentation.screenshotMode) {
+                    presentation.mode = nil
                 }
-            case .rehearsal:
-                OnboardingDebugRehearsalHost(settingsStore: settingsStore) {
-                    destination = nil
+            case .debugRehearsal:
+                OnboardingDebugRehearsalHost(settingsStore: settingsStore, screenshotMode: presentation.screenshotMode) {
+                    presentation.mode = nil
                 }
-            case nil:
+            default:
                 launcher
             }
         }
@@ -46,6 +41,11 @@ struct OnboardingDebugLauncherView: View {
             minWidth: OnboardingUIScaleMetrics.minimumWindowSize.width,
             minHeight: OnboardingUIScaleMetrics.minimumWindowSize.height
         )
+        .background(OnboardingDebugWindowAppearance(
+            screenshotMode: presentation.screenshotMode && presentation.mode?.isDebug == true,
+            title: presentation.screenshotMode && presentation.mode?.isDebug == true
+                ? OnboardingPresentationMode.firstRun.title(for: uiLanguage) : uiText("Koedex Debug")
+        ))
         .onboardingUIScale(uiMetrics)
         .dynamicTypeSize(.xxLarge)
         .environment(\.locale, uiLanguage.locale)
@@ -98,14 +98,19 @@ struct OnboardingDebugLauncherView: View {
                 title: uiText("画面をプレビュー"),
                 detail: uiText("権限、マイク、ショートカットを疑似状態で切り替えます。TCCダイアログや実機器には触れません。"),
                 buttonTitle: uiText("プレビューを開く"),
-                action: { destination = .preview }
+                action: { presentation.mode = .debugPreview }
             )
             debugModeCard(
                 title: uiText("このMacで確認"),
                 detail: uiText("このDebug.appの権限、マイク、グローバルショートカットを使って確認します。録音結果は画面だけに表示し、Codex処理・Web検索・クリップボード読取・履歴保存は行いません。"),
                 buttonTitle: uiText("実機確認を開く"),
-                action: { destination = .rehearsal }
+                action: { presentation.mode = .debugRehearsal }
             )
+
+            Toggle(uiText("撮影用表示（本番と同じ見た目）"), isOn: $presentation.screenshotMode)
+            Text(uiText("オンにしてからプレビューまたは実機確認を開くと、Debug用の表示を隠し、本番と同じ見た目で表示します。設定には保存されません。マイク確認は ⌘⇧V で「音声あり」にでき、⌘⇧D でDebugメニューへ戻れます。"))
+                .font(uiMetrics.font(.caption))
+                .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: uiMetrics.layout(8)) {
                 Text(uiText("セットアップ状態のリセットは進捗だけを初期化します。macOSの権限は変更しません。言語選択画面から確認したい場合は「Debug設定を新規インストール直後に戻す」を使ってください。"))
@@ -222,10 +227,20 @@ struct OnboardingDebugLauncherView: View {
                     retentionDays: settingsStore.settings.aiCommandSettings.historyRetentionDays
                 )
             )
+            settingRow(uiText("高速モード"), fastTierSummary)
+            settingRow(uiText("短い発話の即入力"), uiText(settingsStore.settings.shortUtteranceInstantInsertEnabled ? "オン" : "オフ"))
         }
         .padding(uiMetrics.layout(14))
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    private var fastTierSummary: String {
+        switch settingsStore.settings.fastTierAllModesState {
+        case .allOn: return uiText("高速モード状態: すべてオン")
+        case .allOff: return uiText("高速モード状態: すべてオフ")
+        case .mixed: return uiText("モードごとに設定中")
+        }
     }
 
     private func settingRow(_ title: String, _ value: String) -> some View {
@@ -379,6 +394,7 @@ final class DebugPermissionResetController: ObservableObject {
 
 private struct OnboardingDebugPreviewHost: View {
     @ObservedObject var settingsStore: SettingsStore
+    let screenshotMode: Bool
     let onClose: () -> Void
     @StateObject private var permissionManager = PermissionManager(simulatedStates: .initial)
 
@@ -390,7 +406,8 @@ private struct OnboardingDebugPreviewHost: View {
             forcedInitialStep: nil,
             onForcedInitialStepPresented: nil,
             onQuitPreparationCompleted: hideDebugWindowForQuit,
-            onFinish: onClose
+            onFinish: onClose,
+            screenshotMode: screenshotMode
         )
     }
 
@@ -401,6 +418,7 @@ private struct OnboardingDebugPreviewHost: View {
 
 private struct OnboardingDebugRehearsalHost: View {
     @ObservedObject var settingsStore: SettingsStore
+    let screenshotMode: Bool
     let onClose: () -> Void
     @StateObject private var permissionManager = PermissionManager()
 
@@ -412,7 +430,8 @@ private struct OnboardingDebugRehearsalHost: View {
             forcedInitialStep: nil,
             onForcedInitialStepPresented: nil,
             onQuitPreparationCompleted: hideDebugWindowForQuit,
-            onFinish: onClose
+            onFinish: onClose,
+            screenshotMode: screenshotMode
         )
         .onAppear {
             permissionManager.refresh()
@@ -425,5 +444,87 @@ private struct OnboardingDebugRehearsalHost: View {
 
     private func hideDebugWindowForQuit() {
         NSApp.mainWindow?.orderOut(nil)
+    }
+}
+
+@MainActor
+final class OnboardingDebugPresentationState: ObservableObject {
+    @Published var screenshotMode = false
+    @Published var mode: OnboardingPresentationMode?
+}
+
+struct OnboardingSimulateVoiceKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
+extension FocusedValues {
+    var onboardingSimulateVoice: (() -> Void)? {
+        get { self[OnboardingSimulateVoiceKey.self] }
+        set { self[OnboardingSimulateVoiceKey.self] = newValue }
+    }
+}
+
+private struct OnboardingDebugWindowAppearance: NSViewRepresentable {
+    let screenshotMode: Bool
+    let title: String
+
+    final class WindowView: NSView {
+        var screenshotMode = false
+        var windowTitle = ""
+        private weak var appearanceWindow: NSWindow?
+        private var original: (fullSizeContentView: Bool, titleVisibility: NSWindow.TitleVisibility, transparent: Bool)?
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            apply()
+        }
+
+        func restore() {
+            guard let window = appearanceWindow, let saved = original,
+                  !window.styleMask.contains(.fullScreen) else { return }
+            if saved.fullSizeContentView && !window.styleMask.contains(.fullSizeContentView) {
+                window.styleMask.insert(.fullSizeContentView)
+            }
+            if window.titleVisibility != saved.titleVisibility {
+                window.titleVisibility = saved.titleVisibility
+            }
+            if window.titlebarAppearsTransparent != saved.transparent {
+                window.titlebarAppearsTransparent = saved.transparent
+            }
+            original = nil
+            appearanceWindow = nil
+        }
+
+        func apply() {
+            if appearanceWindow !== window { restore() }
+            guard let window else { return }
+            if window.title != windowTitle { window.title = windowTitle }
+            guard !window.styleMask.contains(.fullScreen) else { return }
+            if screenshotMode {
+                if original == nil {
+                    appearanceWindow = window
+                    original = (window.styleMask.contains(.fullSizeContentView), window.titleVisibility, window.titlebarAppearsTransparent)
+                }
+                if window.styleMask.contains(.fullSizeContentView) {
+                    window.styleMask.remove(.fullSizeContentView)
+                }
+                if window.titleVisibility != .visible { window.titleVisibility = .visible }
+                if window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = false }
+            } else {
+                restore()
+            }
+        }
+    }
+
+    static func dismantleNSView(_ view: WindowView, coordinator: ()) {
+        view.restore()
+    }
+
+    func makeNSView(context: Context) -> WindowView { WindowView() }
+
+    func updateNSView(_ view: WindowView, context: Context) {
+        view.screenshotMode = screenshotMode
+        view.windowTitle = title
+        view.apply()
     }
 }

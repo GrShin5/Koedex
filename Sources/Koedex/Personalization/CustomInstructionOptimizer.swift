@@ -253,7 +253,8 @@ actor CustomInstructionOptimizer {
 
     func optimize(
         customInstruction: String,
-        dictionaryEntries: [PersonalDictionaryEntry]
+        dictionaryEntries: [PersonalDictionaryEntry],
+        fastTier: Bool = false
     ) async throws -> CustomInstructionOptimizationResult {
         let instruction = customInstruction.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !instruction.isEmpty else {
@@ -269,7 +270,11 @@ actor CustomInstructionOptimizer {
         )
 
         do {
-            let optimized = try await runTurn(threadId: threadId, prompt: prompt)
+            let optimized = try await runTurn(
+                threadId: threadId,
+                prompt: prompt,
+                fastTier: FastTierPauseRegistry.shared.effective(fastTier, for: .optimization)
+            )
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !optimized.isEmpty else {
                 throw CustomInstructionOptimizerError.emptyResult
@@ -399,13 +404,13 @@ actor CustomInstructionOptimizer {
         return systemPromptTemplate + runtimeRules
     }
 
-    private func runTurn(threadId: String, prompt: String) async throws -> String {
+    private func runTurn(threadId: String, prompt: String, fastTier: Bool) async throws -> String {
         let (subId, stream) = await client.subscribe(methods: ["item/completed", "turn/completed"])
         defer {
             Task { [client] in await client.unsubscribe(id: subId) }
         }
 
-        let response = try await client.sendRequest("turn/start", params: [
+        let response = try await client.sendTurn(params: [
             "threadId": threadId,
             "input": [
                 [
@@ -416,12 +421,14 @@ actor CustomInstructionOptimizer {
             ],
             "sandboxPolicy": ["type": "readOnly", "networkAccess": false],
             "approvalPolicy": "never",
-        ], timeoutSeconds: timeoutSeconds)
+        ], fastTier: fastTier, timeoutSeconds: timeoutSeconds)
         guard let turn = response["turn"] as? [String: Any],
               let turnId = turn["id"] as? String else {
             throw CustomInstructionOptimizerError.emptyResult
         }
 
+        let carriedTier = response["_koedexFastTier"] as? Bool == true
+        let turnClient = client
         let timeoutNanoseconds = UInt64(timeoutSeconds * 1_000_000_000)
         return try await withThrowingTaskGroup(of: String.self) { group in
             group.addTask {
@@ -441,8 +448,14 @@ actor CustomInstructionOptimizer {
                         if let params = event.params,
                            params["threadId"] as? String == threadId,
                            Self.eventTurnID(params) == turnId,
-                           let status = params["status"] as? String,
-                           status == "failed" {
+                           let status = ((params["turn"] as? [String: Any])?["status"] as? String)
+                               ?? (params["status"] as? String),
+                           status == "failed" || status == "interrupted" {
+                            if carriedTier {
+                                await turnClient.pauseFastTier()
+                                // 最適化は実行ごとにclientを作り直すため、停止はengine外で保持する。
+                                FastTierPauseRegistry.shared.pause(.optimization)
+                            }
                             throw CustomInstructionOptimizerError.emptyResult
                         }
                     default:

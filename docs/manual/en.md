@@ -577,7 +577,11 @@ launch key.**
 | --- | --- | --- | --- |
 | Automatic recording stop | 3 min / 5 min (recommended) / 10 min | If you forget to stop while still talking, recording stops automatically after this time | Yes |
 | Standard-mode history retention | Do not save / 1 day / 30 days / 180 days / Unlimited | How many days of results stay in the [History tab](#9-history-tab) | Yes |
+| Use Fast mode in all AI modes | On / Off (off by default) | AI responds a little faster, but uses more of your ChatGPT plan's quota. Turning it on enables Fast mode for Standard-mode AI cleanup, hands-free send, AI command mode, and custom instruction optimization at once. Unsupported models automatically run at normal speed. A note appears if the modes currently have different settings | Yes, individually for each mode in Settings |
+| Insert short phrases instantly without AI cleanup | On / Off (off by default) | Short phrases of 12 characters or fewer, such as “Got it” or “Thanks”, are inserted immediately without AI cleanup when the conditions are met. Punctuation may differ slightly. This is not used in hands-free send mode | Yes, in Settings |
 | Enable Hands-free send mode | On / Off (optional) | Turning it on shows extra history settings on this same screen, and if Compatibility Input Mode is on, it also turns on "Also auto-send in external apps" in Settings. Unticking it turns that back off | Yes |
+
+The two options under “Faster AI processing (optional)” do not appear in the Setup guide opened from the menu bar.
 
 > **Note**: "1 minute" only appears as a choice if your existing setting for automatic stop
 > is already 60 seconds.
@@ -917,6 +921,8 @@ voice input, if what you say is long enough to hit the same limit.
 
 ### AI assist
 
+“Insert short phrases instantly without AI cleanup” is OFF by default. When enabled, normal input of up to 12 characters skips cleanup if it has no fillers, repetitions, enabled dictionary spoken forms, or language override. Hands-free send is excluded. Punctuation may differ slightly.
+
 | Item | Detail |
 | --- | --- |
 | What it's for | Decides whether transcription gets cleaned up by AI |
@@ -948,6 +954,8 @@ Koedex lets you choose an AI [model](#model) for each purpose.
 | AI Assist model selection | Cleanup in Standard mode | On a fresh install: GPT-6 Luna / low (retains the previous initial settings if unavailable) |
 | Model for AI Command mode | Processing in AI Command mode | On a fresh install: GPT-6 Luna / low (retains the previous initial settings if unavailable) |
 | Model used for optimization | Optimizing custom instructions | On a fresh install: GPT-6 Luna / low (retains the previous initial settings if unavailable) |
+
+Fast mode is off by default and can be set separately for Standard-mode AI cleanup, hands-free send, AI command, and custom instruction optimization. Each toggle appears when the live model catalog advertises support for the selected model or when it is already on. In model settings, “Apply fast mode to all modes” offers “Turn all on” and “Turn all off” and shows the current status. Fast mode uses more of your plan’s quota and automatically falls back when unavailable. When the Mac is offline, AI cleanup is skipped immediately and the unformatted text is inserted; hands-free send shows the review window and does not send. Apply the recommendation in model settings to switch only AI cleanup to an available Luna model with low effort.
 
 #### Models you can choose
 
@@ -1049,9 +1057,7 @@ Koedex never silently rewrites an already-saved value that no longer qualifies.
 | 5 | The clipboard is empty |
 | 6 | The content exceeds 12,000 characters |
 
-**What is never saved**: the clipboard's contents, the source text, AI's answer, any
-referenced URLs, or audio. Only the transcription of the spoken instruction stays in
-history, tagged "Clipboard mode."
+**History**: your spoken instruction is saved, tagged "Clipboard mode." If answer history is enabled, the delivered AI answer is also saved and may quote the clipboard or selected text. These source contents are not saved as separate items. Text blocked by Secure Input, audio, and reference links are not saved.
 
 **Clipboard restoration**: about one second after pasting, Koedex **attempts to restore**
 your original clipboard content. If that fails, the original content isn't guaranteed. It
@@ -1151,36 +1157,17 @@ state. See [13. Troubleshooting](#13-troubleshooting).
 
 ## 9. History tab
 
-Choose "History" in the Settings sidebar to review your past input.
-
 ### What is and isn't saved
 
-> **Most important point: in AI Command mode, only the transcription of your spoken
-> instruction is saved.**
+When history is enabled both at recording start and when saving, normal and hands-free dictation keep inserted output and output shown in result windows. Cleanup failures keep the original output. Voice-trigger review output is marked Needs review; window output is marked Shown in window. Secure input keeps metadata only. Cancellation, empty output and trigger-only sends are not recorded.
 
-| Mode | What's saved as the body |
-| --- | --- |
-| Standard mode | The **output text** that was safely inserted |
-| Hands-free send mode | The **output text** that was safely inserted |
-| AI Command mode | **Only the transcription of your spoken instruction** |
-
-What is **not** saved in AI Command mode:
-
-| Not saved |
-| --- |
-| The text you had selected |
-| Clipboard content |
-| AI's answer |
-| Any referenced URL |
-| Audio data |
-
-This isn't something turned off by a setting. It is **structurally impossible to pass to
-history** in the first place. No setting change makes it start saving these.
+AI command history first keeps the spoken instruction, then updates the same entry with the delivered answer. Keep AI command answers in history defaults to ON; turning it OFF keeps instructions only. Answers may include text from the selection or clipboard. The instruction appears as a secondary caption. Audio and source links are not saved.
 
 ### When insertion fails
 
-If insertion fails, or the input was too short, **only metadata is kept, with no body text**
-(date and time, which model was used, etc.). This too is removed by "Delete all history."
+Output shown in a result window after insertion could not be confirmed is also saved. Secure input keeps metadata only, without body text.
+
+Copy Last Original Transcript is available for ten minutes when cleanup output differs from the original transcript. The original stays in memory only and is cleared at the next recording start.
 
 ### What each row shows
 
@@ -1364,11 +1351,12 @@ Listed top to bottom. Some items only appear in certain situations.
 | 4 | Choose microphone | A submenu listing "Automatic" and detected devices, with a checkmark on the current one |
 | 5 | Language / 言語 | A submenu |
 | 6 | AI assist | Toggles on/off |
-| 7 | Copy Last AI Output | Only shown when there's a recent AI output |
-| 8 | Resume setup… | Only shown if setup is incomplete |
-| 9 | Setup guide… | Opens a 4-step review screen (Welcome / Microphone and launch key / AI Command mode / Complete). Doesn't change your settings |
-| 10 | Settings… | Opens the Settings window |
-| 11 | Quit | Quits Koedex |
+| 7 | Copy Last Original Transcript | Always shown. Available for ten minutes when cleanup output differs from the original transcript |
+| 8 | Copy Last AI Output | Only shown when there's a recent AI output |
+| 9 | Resume setup… | Only shown if setup is incomplete |
+| 10 | Setup guide… | Opens a 4-step review screen (Welcome / Microphone and launch key / AI Command mode / Complete). Doesn't change your settings |
+| 11 | Settings… | Opens the Settings window |
+| 12 | Quit | Quits Koedex |
 
 ### How the icon changes
 
@@ -1803,8 +1791,7 @@ takes priority.
 
 ### Why doesn't AI's answer show up in history?
 
-By design, AI Command mode only passes the transcription of your spoken instruction to
-history. The selected text, AI's answer, and any referenced URLs are never saved. See
+AI Command saves your spoken instruction and, when “Keep AI command answers in history” is enabled, the AI answer inserted or shown in a window. Text blocked by Secure Input is not saved. Selected text and clipboard contents are not saved as separate items, but the answer may quote them. Audio and reference links are not saved. See
 [9. History tab](#9-history-tab).
 
 ### Hands-free send won't send for me
@@ -2187,7 +2174,7 @@ need to look for or click, instead of asking me questions that only use engineer
 
 PINNED SOURCE
 - Official URL: https://github.com/GrShin5/Koedex.git
-- Release tag: v0.1.10
+- Release tag: v0.2.0
 - Verification method: GitHub immutable release
 
 WORKING LOCATION
@@ -2210,15 +2197,15 @@ HOW TO PROCEED
   ZIP download, or installation method.
 
 FETCH AND VERIFY
-1. Clone v0.1.10 into the new destination using a command equivalent to:
-   git clone --branch v0.1.10 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
+1. Clone v0.2.0 into the new destination using a command equivalent to:
+   git clone --branch v0.2.0 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
 2. Before running any repository script, verify all of the following:
    - origin's fetch URL matches https://github.com/GrShin5/Koedex.git
      (you may treat only a trailing .git as equivalent during comparison)
-   - the local v0.1.10 tag's commit exactly equals HEAD
-   - refs/tags/v0.1.10 returned by git ls-remote against the official URL exactly equals HEAD
-   - GitHub's official releases/tags/v0.1.10 API reports tag_name=v0.1.10 and immutable=true
-   - if GitHub CLI is already available, gh release verify v0.1.10 --repo GrShin5/Koedex also succeeds
+   - the local v0.2.0 tag's commit exactly equals HEAD
+   - refs/tags/v0.2.0 returned by git ls-remote against the official URL exactly equals HEAD
+   - GitHub's official releases/tags/v0.2.0 API reports tag_name=v0.2.0 and immutable=true
+   - if GitHub CLI is already available, gh release verify v0.2.0 --repo GrShin5/Koedex also succeeds
    - the checkout is clean and has no untracked files
 3. If any value differs, the release is missing or not immutable, or a value cannot be
    verified, do not run a repository script. Report the values you could verify in a table
@@ -2306,12 +2293,12 @@ swift --version
 ### Step 1: Clone the repository
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_EN -->
-Clone only the single point tagged `v0.1.10` from the official repository. Do not take the latest
+Clone only the single point tagged `v0.2.0` from the official repository. Do not take the latest
 state (`main`) — take this release and nothing else. Do not run this where a folder named `Koedex`
 already exists.
 
 ```bash
-git clone --branch v0.1.10 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.2.0 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -2321,7 +2308,7 @@ Inside the folder the clone created, paste and run the following as-is.
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.1.10"
+EXPECTED_TAG="v0.2.0"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -2347,11 +2334,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 If even one ❌ appears, stop there. Do not switch to a different URL, a different tag, a ZIP
 download, a mirror, or any other way of obtaining the source.
 
-A tag can be moved later, so also confirm on GitHub's Releases page that `v0.1.10` is published as
+A tag can be moved later, so also confirm on GitHub's Releases page that `v0.2.0` is published as
 an immutable release. If you have the GitHub CLI, you can confirm the same thing with:
 
 ```bash
-gh release verify v0.1.10 --repo GrShin5/Koedex
+gh release verify v0.2.0 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_EN -->
 
@@ -2432,8 +2419,8 @@ Once it launches, continue with [6. First-time setup](#6-first-time-setup).
 
 | Item | Detail |
 | --- | --- |
-| Release covered | v0.1.10 |
-| App version covered | 0.1.10 |
+| Release covered | v0.2.0 |
+| App version covered | 0.2.0 |
 | Manual language | English |
 
 This manual was written against the source code in the release above. Newer versions may
@@ -2482,7 +2469,7 @@ use docs/agent-install-prompt.md instead.
 
 PINNED SOURCE
 - Official URL: https://github.com/GrShin5/Koedex.git
-- Release tag: v0.1.10
+- Release tag: v0.2.0
 - Verification method: GitHub immutable release
 
 WORKING LOCATION
@@ -2514,15 +2501,15 @@ STEP 1: SET ASIDE THE CURRENT INSTALL
    An equivalent Finder drag is fine too, but never delete or trash it.
 
 STEP 2: FETCH AND VERIFY THE NEW VERSION
-1. Clone v0.1.10 into the new destination using a command equivalent to:
-   git clone --branch v0.1.10 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
+1. Clone v0.2.0 into the new destination using a command equivalent to:
+   git clone --branch v0.2.0 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
 2. Before running any repository script, verify all of the following:
    - origin's fetch URL matches https://github.com/GrShin5/Koedex.git
      (you may treat only a trailing .git as equivalent during comparison)
-   - the local v0.1.10 tag's commit exactly equals HEAD
-   - refs/tags/v0.1.10 returned by git ls-remote against the official URL exactly equals HEAD
-   - GitHub's official releases/tags/v0.1.10 API reports tag_name=v0.1.10 and immutable=true
-   - if GitHub CLI is already available, gh release verify v0.1.10 --repo GrShin5/Koedex also succeeds
+   - the local v0.2.0 tag's commit exactly equals HEAD
+   - refs/tags/v0.2.0 returned by git ls-remote against the official URL exactly equals HEAD
+   - GitHub's official releases/tags/v0.2.0 API reports tag_name=v0.2.0 and immutable=true
+   - if GitHub CLI is already available, gh release verify v0.2.0 --repo GrShin5/Koedex also succeeds
    - the checkout is clean and has no untracked files
 3. If any value differs, the release is missing or not immutable, or a value cannot be
    verified, do not run a repository script. Report the values you could verify in a table

@@ -43,6 +43,7 @@ enum AICommandOutputRoutingPolicy {
 @MainActor
 final class VoiceSession {
     let id = UUID()
+    var historyEnabledAtRecordingStart = false
     let mode: VoiceMode
     let startedAt = Date()
     let selectedText: String?
@@ -69,6 +70,7 @@ final class VoiceSession {
     /// キャレットへ再ターゲットしない。
     var aiCommandOutputTarget: NormalPasteTarget?
     var aiCommandOutputDestination: InsertionDestination?
+    var dictationLatencyTrace: DictationLatencyTrace?
     private(set) var isCancelled = false
 
     init(

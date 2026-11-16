@@ -1205,15 +1205,16 @@ actor AICommandEngine {
         }
 
         let turnStartTimeoutSeconds = max(0.1, min(20, Double(turnTimeoutMs) / 1_000))
-        let response = try await client.sendRequest(
-            "turn/start",
+        let response = try await client.sendTurn(
             params: params,
+            fastTier: FastTierPauseRegistry.shared.effective(request.fastTierEnabled, for: .aiCommand),
             timeoutSeconds: turnStartTimeoutSeconds,
             cancellationMode: .cancelWithTask
         )
         guard let turn = response["turn"] as? [String: Any], let turnID = turn["id"] as? String else {
             throw AICommandError.invalidResponse
         }
+        let carriedTier = response["_koedexFastTier"] as? Bool == true
         try Task.checkCancellation()
         guard cancellationEpoch == executionCancellationEpoch,
               executionLease?.id == executionID,
@@ -1337,6 +1338,11 @@ actor AICommandEngine {
                                     eventContinuation.yield(.completionGraceExpired)
                                 }
                             case .terminalFailure(let status, let codexErrorInfo):
+                                if carriedTier {
+                                    await client.pauseFastTier()
+                                    // web用clientは失敗時に破棄されるため、engine外でも停止を保持する。
+                                    FastTierPauseRegistry.shared.pause(.aiCommand)
+                                }
                                 throw AICommandError.turnFailed(status: status, codexErrorInfo: codexErrorInfo)
                             case .completedWithoutAnswer:
                                 throw AICommandError.completedWithoutAnswer
