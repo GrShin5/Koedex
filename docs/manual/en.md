@@ -401,30 +401,46 @@ If you already have Koedex installed and want to move to a newer release, follow
 error and **does not overwrite** an existing `/Applications/Koedex.app`. So updating goes in
 this order:
 
-1. Move the currently installed `Koedex.app` out of `/Applications` without deleting it (for
-   example, drag it to the Desktop).
-2. Clone the new release tag into a **fresh** folder — don't update the old clone folder in
-   place. The steps are the same ones used for (a), (b), or (c): see
-   [17. Appendix A](#17-appendix-a-let-an-ai-agent-handle-installation) or
-   [18. Appendix B](#18-appendix-b-build-from-source-yourself).
-3. Build it. If you kept the app you moved aside in step 1, add
-   `--previous-app <path to that app>` to the build command
-   (`./scripts/make_app.sh release --previous-app <path>`) so the build verifies signing
-   continuity against it and prints
+1. Read-only: check that `/Applications/Koedex.app` exists and read its version.
+2. Clone `v0.2.1` into `~/Developer/Koedex-v0.2.1`. If occupied, automatically use
+   `-2`, `-3`, and so on. Never delete, overwrite, or reuse an existing folder.
+   Verify the official source, tag, HEAD, and immutable release as described in
+   [the update prompt](../agent-update-prompt.md) before running any repository script.
+3. Run `bash scripts/preflight.sh` without `--install`. Exactly one WARN about the existing
+   app is expected. If the SwiftUI component check FAILs, stop before building and follow
+   its guidance. If Xcode is already installed, retry only the failing build/check command
+   with `DEVELOPER_DIR=<existing /Applications/Xcode*.app>/Contents/Developer`.
+   Do not change system settings or run `xcode-select -s`.
+4. Keep the old app in `/Applications` and run
+   `./scripts/make_app.sh release --previous-app /Applications/Koedex.app`.
+   Require exit code zero, a valid deep strict signature, and the line
    `更新互換性OK: bundle ID、Designated Requirement、署名者証明書は連続しています。`
-4. Now that step 1 cleared `/Applications`, install the new app — either with
-   `scripts/install_app.sh` or by dragging `dist/Koedex.app` into `/Applications` yourself.
+   The ⚠️ line saying `/Applications/Koedex.app` already exists is expected. Stop on
+   `error:`, signing failure, "cannot be verified as a stable signature", or any other
+   script-printed ⚠️ line. Report compiler warnings; they alone do not require stopping.
+   Then confirm continuity directly against the installed app:
+   `bash scripts/verify_app_identity.sh /Applications/Koedex.app dist/Koedex.app`
+   must exit with zero and print the same line.
+5. Only after the build succeeds, switch over in one go (an agent explains any warnings and
+   asks for approval once here): quit Koedex and move the old app to
+   `~/Developer/Koedex-backups/Koedex-<old version>.app` (add `-2`, `-3` before `.app` if occupied).
+   Run `bash scripts/install_app.sh` with no arguments and verify bundle ID, deep strict
+   signature, and signer continuity. Never overwrite an app or backup. Never use Desktop.
+   If `install_app.sh` fails, move the backup straight back to `/Applications/Koedex.app`.
+6. Check permissions. Use `tccutil` only for the broken-permission symptom described below.
+7. Manually open TextEdit, press fn, say a short sentence, press fn again, and check that
+   text is inserted. If other UI automation takes more than 1–2 minutes, use manual steps.
 
 **Your permissions carry over — you don't need to grant them again.** Building from this
 repository always keeps the same bundle ID and signing identity, and `scripts/make_app.sh`
-itself checks that continuity (see step 3). macOS ties the Microphone, Speech Recognition,
-and Accessibility grants to that identity rather than to the specific `.app` file, so a new
+itself checks that continuity (see step 4). macOS ties the マイク / Microphone, 音声認識 / Speech Recognition,
+and アクセシビリティ / Accessibility grants to that identity rather than to the specific `.app` file, so a new
 build inherits what you already granted the old one.
 
 **But updating does not fix a permission that's already broken.** If Koedex shows a
 permission as already granted yet recording or pasting still doesn't work, and Koedex
 doesn't appear at all in System Settings → Privacy & Security →
-Microphone/Speech Recognition/Accessibility, that's a leftover macOS permission record (TCC)
+マイク / Microphone・音声認識 / Speech Recognition・アクセシビリティ / Accessibility, that's a leftover macOS permission record (TCC)
 from an earlier install on this Mac — updating the app doesn't touch it. This was confirmed
 on a real affected Mac. To clear it, quit Koedex, then run these three commands **without
 `sudo`**:
@@ -439,6 +455,8 @@ Then reopen Koedex and grant the three permissions again normally, as in
 [Step 3: Three permissions](#step-3-three-permissions) above.
 
 ---
+
+Permission display names may vary slightly by macOS version.
 
 ## 6. First-time setup
 
@@ -2079,15 +2097,18 @@ on-screen instructions, then tell it you're done.
 
 ### Working location and recommended model
 
-Use `~/Developer` as the default parent folder and make the new clone at
-`~/Developer/Koedex`. Only use `~/Downloads/Koedex` if Developer cannot be used. Avoid
-Desktop, Documents, iCloud Drive, File Provider locations, symlinks, and old clones.
+Use `~/Developer` as the default parent folder. A new installation is cloned into
+`~/Developer/Koedex`, and an update into `~/Developer/Koedex-v0.2.1`. If that folder already
+exists, the agent automatically adds `-2`, `-3`, and so on; it never reuses or deletes an
+existing folder. Only use `~/Downloads` if Developer cannot be used. Avoid Desktop, Documents,
+iCloud Drive, File Provider locations, symlinks, and old clones.
 
-As of 2026-08-24, the recommended installer agent is Codex `GPT-5.6-Terra` / `medium`, or
-Claude Code `Sonnet 5` / `medium` when available and `default` / `medium` otherwise. Use the
+As of 2026-11-17, the recommended installer agent is Codex `GPT-6.1-Sol` / `medium`, or
+Claude Code `Sonnet 5.5` / `medium` when available and `default` / `medium` otherwise. Use the
 client default if effort cannot be selected. Check Claude Code's current availability and
 configuration in its [official model documentation](https://code.claude.com/docs/en/model-config).
-This setting is for the agent doing the installation, not Koedex's in-app AI model.
+You do not need to force a model or effort level that is unavailable. This setting is for the
+agent doing the installation, not Koedex's in-app AI model.
 
 ### Method 1: Using a desktop AI agent
 
@@ -2174,7 +2195,7 @@ need to look for or click, instead of asking me questions that only use engineer
 
 PINNED SOURCE
 - Official URL: https://github.com/GrShin5/Koedex.git
-- Release tag: v0.2.0
+- Release tag: v0.2.1
 - Verification method: GitHub immutable release
 
 WORKING LOCATION
@@ -2182,13 +2203,15 @@ WORKING LOCATION
 2. Only if ~/Developer cannot be created or used, offer ~/Downloads/Koedex instead.
 3. Do not work in Desktop, Documents, iCloud Drive, another File Provider location, or
    through a symlink.
-4. If the destination already exists, contains anything, is a symlink, or is an existing
-   clone with uncommitted changes, do not delete, overwrite, or reuse it. Report its location
-   and state in plain language, then stop.
+4. If the destination exists (including a symlink), automatically try -2, -3, and so on.
+   Use a new folder; never delete, overwrite, or reuse an existing folder.
 
 HOW TO PROCEED
+- If you are in plan mode or read-only mode, say so in one sentence and show how to switch to a mode that can run commands and edit files. The normal mode that asks before running commands is enough; do not ask me for a full-access or skip-permissions mode. Do not silently return only a plan.
 - Complete all read-only preflight checks first, then report every finding and all action I
   need to take in one batch. Do not interrupt me once per finding.
+- A report alone is not a reason to wait. Stop only for the approvals below, a failed
+  required check, or something only I can do; otherwise continue to the next step.
 - Still ask immediately before a safety-sensitive action such as changing Keychain,
   writing to /Applications, handling Gatekeeper, or granting macOS permissions. Explain
   what will change and wait for my approval. Do not promise a fixed number of pauses.
@@ -2196,16 +2219,38 @@ HOW TO PROCEED
   same URL, ref, and command once. Do not independently switch to another URL, ref, mirror,
   ZIP download, or installation method.
 
+- A failed check in a sandbox or restricted environment is unconfirmed, not absent. For
+  example, "cannot reach GitHub" or "0 certificates found" does not prove absence. Ask for
+  approval to rerun the same read-only command with the needed access before concluding.
+- Report compiler warnings, but they alone do not require a pause. For the build, stop on
+  a non-zero exit code, error:, signing failure, or a ⚠️ line printed by the scripts. Keep all other safety checks.
+
+WHENEVER YOU STOP
+Show all six items: ① what is done; ② why you stopped; ③ whether Koedex is usable yet
+(or is unconfirmed); ④ the recommended choice and an exact reply I can send, such as
+"Proceed with this"; ⑤ what will run automatically after approval; ⑥ how to undo.
+If a required check failed, recommend fixing it and rerunning that check, not bypassing it.
+Never end with only "waiting for instructions".
+
+MANUAL FINAL CHECK
+Ask me to open TextEdit, press fn, say a short sentence, press fn again, and check that
+text appears. This check is manual only. If any other UI automation takes more than
+1–2 minutes, switch to manual instructions. Permission names are マイク / Microphone,
+音声認識 / Speech Recognition, and アクセシビリティ / Accessibility; names may vary slightly
+by macOS version.
+
 FETCH AND VERIFY
-1. Clone v0.2.0 into the new destination using a command equivalent to:
-   git clone --branch v0.2.0 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
+0. Before cloning, check read-only whether /Applications/Koedex.app exists. If it does, stop
+   and tell me to use docs/agent-update-prompt.md instead. Never recommend removing it.
+1. Clone v0.2.1 into the new destination using a command equivalent to:
+   git clone --branch v0.2.1 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
 2. Before running any repository script, verify all of the following:
    - origin's fetch URL matches https://github.com/GrShin5/Koedex.git
      (you may treat only a trailing .git as equivalent during comparison)
-   - the local v0.2.0 tag's commit exactly equals HEAD
-   - refs/tags/v0.2.0 returned by git ls-remote against the official URL exactly equals HEAD
-   - GitHub's official releases/tags/v0.2.0 API reports tag_name=v0.2.0 and immutable=true
-   - if GitHub CLI is already available, gh release verify v0.2.0 --repo GrShin5/Koedex also succeeds
+   - the local v0.2.1 tag's commit exactly equals HEAD
+   - refs/tags/v0.2.1 returned by git ls-remote against the official URL exactly equals HEAD
+   - GitHub's official releases/tags/v0.2.1 API reports tag_name=v0.2.1 and immutable=true
+   - if GitHub CLI is already available, gh release verify v0.2.1 --repo GrShin5/Koedex also succeeds
    - the checkout is clean and has no untracked files
 3. If any value differs, the release is missing or not immutable, or a value cannot be
    verified, do not run a repository script. Report the values you could verify in a table
@@ -2239,7 +2284,8 @@ BUILD AND INSTALL
    continuity with the source app, then report the results.
 
 DO NOT CHANGE
-- Do not modify anything under ~/.codex/ and do not reset TCC permissions.
+- Do not hand-edit Codex settings or credentials under ~/.codex/. Codex CLI saving its own
+  state during normal operation is fine. Do not reset TCC permissions.
 - Do not automatically delete an existing app, old certificate, Keychain item, Koedex
   settings, or history.
 - Do not fetch or run scripts from outside the repository or install new software on your
@@ -2247,11 +2293,14 @@ DO NOT CHANGE
 - Do not independently use sudo, delete or overwrite files, disable Gatekeeper, or broadly
   remove quarantine attributes.
 
+Undo: with approval, quit Koedex and move the installed app to a fresh backup folder.
+Do not automatically delete app data, permissions, or certificates.
+
 FINAL REPORT
 1. Working location and the verified origin, tag, and HEAD
 2. Every preflight, build, install, and signature PASS/WARN/FAIL
 3. Safe first launch in Finder and what to do if Gatekeeper blocks it
-4. How to grant Microphone, Speech Recognition, and Accessibility permissions
+4. How to grant マイク / Microphone, 音声認識 / Speech Recognition, and アクセシビリティ / Accessibility permissions
 5. How to verify the Codex CLI connection and what to do if it is unavailable
 6. State that old macOS permissions or signing records can remain after deleting an older
    app, and that you did not automatically reset or delete them
@@ -2293,12 +2342,12 @@ swift --version
 ### Step 1: Clone the repository
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_EN -->
-Clone only the single point tagged `v0.2.0` from the official repository. Do not take the latest
+Clone only the single point tagged `v0.2.1` from the official repository. Do not take the latest
 state (`main`) — take this release and nothing else. Do not run this where a folder named `Koedex`
 already exists.
 
 ```bash
-git clone --branch v0.2.0 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.2.1 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -2308,7 +2357,7 @@ Inside the folder the clone created, paste and run the following as-is.
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.2.0"
+EXPECTED_TAG="v0.2.1"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -2334,11 +2383,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 If even one ❌ appears, stop there. Do not switch to a different URL, a different tag, a ZIP
 download, a mirror, or any other way of obtaining the source.
 
-A tag can be moved later, so also confirm on GitHub's Releases page that `v0.2.0` is published as
+A tag can be moved later, so also confirm on GitHub's Releases page that `v0.2.1` is published as
 an immutable release. If you have the GitHub CLI, you can confirm the same thing with:
 
 ```bash
-gh release verify v0.2.0 --repo GrShin5/Koedex
+gh release verify v0.2.1 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_EN -->
 
@@ -2419,8 +2468,8 @@ Once it launches, continue with [6. First-time setup](#6-first-time-setup).
 
 | Item | Detail |
 | --- | --- |
-| Release covered | v0.2.0 |
-| App version covered | 0.2.0 |
+| Release covered | v0.2.1 |
+| App version covered | 0.2.1 |
 | Manual language | English |
 
 This manual was written against the source code in the release above. Newer versions may
@@ -2469,47 +2518,62 @@ use docs/agent-install-prompt.md instead.
 
 PINNED SOURCE
 - Official URL: https://github.com/GrShin5/Koedex.git
-- Release tag: v0.2.0
+- Release tag: v0.2.1
 - Verification method: GitHub immutable release
 
 WORKING LOCATION
-1. Use ~/Developer/Koedex-update as the new clone destination.
-2. Only if ~/Developer cannot be created or used, offer ~/Downloads/Koedex-update instead.
+1. Use ~/Developer/Koedex-v0.2.1 as the new clone destination.
+2. Only if ~/Developer cannot be created or used, offer ~/Downloads/Koedex-v0.2.1 instead.
 3. Do not delete, overwrite, or reuse the clone folder from the original install (for
    example ~/Developer/Koedex). The new clone must be a separate, new folder.
 4. Do not work in Desktop, Documents, iCloud Drive, another File Provider location, or
    through a symlink.
-5. If the new destination already exists, do not delete, overwrite, or reuse it. Report its
-   location and state in plain language, then stop.
+5. If the destination exists (including a symlink), automatically try -2, -3, and so on.
+   Use a new folder; never delete, overwrite, or reuse an existing folder.
 
 HOW TO PROCEED
+- If you are in plan mode or read-only mode, say so in one sentence and show how to switch to a mode that can run commands and edit files. The normal mode that asks before running commands is enough; do not ask me for a full-access or skip-permissions mode. Do not silently return only a plan.
 - Complete all read-only preflight checks first, then report every finding and all action I
   need to take in one batch. Do not interrupt me once per finding.
-- Still ask immediately before moving the app in /Applications, changing Keychain, writing a
-  new app into /Applications, or running tccutil reset. Explain what will change and wait
-  for my approval. Do not promise a fixed number of pauses.
+- A report alone is not a reason to wait. Stop only for the approvals below, a failed
+  required check, or something only I can do; otherwise continue to the next step.
+- Still ask before changing Keychain, before the switch-over in STEP 5 (one approval that
+  covers quitting Koedex, moving the old app aside, and installing the new app), and before
+  running tccutil reset. Explain what will change and wait for my approval. Do not promise
+  a fixed number of pauses.
 - If sandbox or network approval caused a command to fail, after approval you may retry the
   same URL, ref, and command once. Do not independently switch to another URL, ref, mirror,
   ZIP download, or installation method.
 
-STEP 1: SET ASIDE THE CURRENT INSTALL
-1. Confirm /Applications/Koedex.app actually exists. If it does not, stop and direct me to
-   docs/agent-install-prompt.md instead.
-2. Before doing anything, explain that you will move (not delete)
-   /Applications/Koedex.app to ~/Desktop/Koedex-old.app, and wait for my approval.
-3. After approval, run: mv /Applications/Koedex.app ~/Desktop/Koedex-old.app
-   An equivalent Finder drag is fine too, but never delete or trash it.
+- A failed check in a sandbox or restricted environment is unconfirmed, not absent. For
+  example, "cannot reach GitHub" or "0 certificates found" does not prove absence. Ask for
+  approval to rerun the same read-only command with the needed access before concluding.
+- Report compiler warnings, but they alone do not require a pause. For the build, stop on
+  a non-zero exit code, error:, signing failure, or a ⚠️ line printed by the scripts, except
+  the expected line saying /Applications/Koedex.app already exists (preflight prints it and
+  the build repeats it). Also stop if the compatibility-OK line is missing. Keep all other safety checks.
+
+WHENEVER YOU STOP
+Show all six items: ① what is done; ② why you stopped; ③ whether the current app still
+works (or is unconfirmed); ④ the recommended choice and an exact reply I can send, such as
+"Proceed with this"; ⑤ what will run automatically after approval; ⑥ how to undo.
+If a required check failed, recommend fixing it and rerunning that check, not bypassing it.
+Never end with only "waiting for instructions".
+
+STEP 1: CHECK THE CURRENT INSTALL
+Read-only: confirm /Applications/Koedex.app exists and read its version. If absent, stop
+and direct me to docs/agent-install-prompt.md. Leave the app in /Applications, and do not move or quit it, until the build succeeds.
 
 STEP 2: FETCH AND VERIFY THE NEW VERSION
-1. Clone v0.2.0 into the new destination using a command equivalent to:
-   git clone --branch v0.2.0 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
+1. Clone v0.2.1 into the new destination using a command equivalent to:
+   git clone --branch v0.2.1 --single-branch https://github.com/GrShin5/Koedex.git <new-destination>
 2. Before running any repository script, verify all of the following:
    - origin's fetch URL matches https://github.com/GrShin5/Koedex.git
      (you may treat only a trailing .git as equivalent during comparison)
-   - the local v0.2.0 tag's commit exactly equals HEAD
-   - refs/tags/v0.2.0 returned by git ls-remote against the official URL exactly equals HEAD
-   - GitHub's official releases/tags/v0.2.0 API reports tag_name=v0.2.0 and immutable=true
-   - if GitHub CLI is already available, gh release verify v0.2.0 --repo GrShin5/Koedex also succeeds
+   - the local v0.2.1 tag's commit exactly equals HEAD
+   - refs/tags/v0.2.1 returned by git ls-remote against the official URL exactly equals HEAD
+   - GitHub's official releases/tags/v0.2.1 API reports tag_name=v0.2.1 and immutable=true
+   - if GitHub CLI is already available, gh release verify v0.2.1 --repo GrShin5/Koedex also succeeds
    - the checkout is clean and has no untracked files
 3. If any value differs, the release is missing or not immutable, or a value cannot be
    verified, do not run a repository script. Report the values you could verify in a table
@@ -2517,7 +2581,7 @@ STEP 2: FETCH AND VERIFY THE NEW VERSION
 
 STEP 3: PREFLIGHT
 Only after every source check passes, run this inside the new clone:
-  KOEDEX_LANG=en bash scripts/preflight.sh --install
+  KOEDEX_LANG=en bash scripts/preflight.sh
 Review the complete output for macOS, Swift, Command Line Tools, Codex CLI, OpenSSL 3,
 Keychain, free disk space, and working location. Report every PASS/WARN/FAIL in one batch. A
 signing certificate should already exist from the original install. Only if none is found,
@@ -2525,30 +2589,46 @@ explain before running bash scripts/make_signing_cert.sh that it creates a self-
 code-signing certificate, imports it into the login Keychain, and marks it Always Trust, and
 wait for my approval.
 
+Exactly one WARN about the existing app is expected. A WARN that OpenSSL 3 was not found but the
+certificate already exists is also harmless for updates. If the SwiftUI component check FAILs,
+stop before building and follow its guidance. Only if Xcode is already installed, you may
+retry just the failing build/check command with DEVELOPER_DIR=<existing /Applications/Xcode*.app>/Contents/Developer.
+Do not change system settings or run xcode-select -s.
+
 STEP 4: BUILD
-1. Run: ./scripts/make_app.sh release --previous-app ~/Desktop/Koedex-old.app
+1. Run: ./scripts/make_app.sh release --previous-app /Applications/Koedex.app
 2. Verify exit status zero, dist/Koedex.app exists, bundle ID is com.koedex.app, and its
    deep strict signature is valid.
 3. Verify the output includes a line reading (in Japanese)
    "更新互換性OK: bundle ID、Designated Requirement、署名者証明書は連続しています。" — this
-   confirms signing continuity with the app you set aside. If that line is missing, or any
-   warning or failure appears, do not proceed to install; report the output as-is and stop.
+   confirms signing continuity with the app still in /Applications. The ⚠️ line saying
+   /Applications/Koedex.app already exists is expected here. If the OK line is missing, the
+   output says the app cannot be verified as a stable signature (安定署名として検証できません),
+   or any error:, non-zero exit code, signing failure, or other script-printed ⚠️ line
+   appears, do not proceed to install; report the output as-is and stop.
+4. Then run: bash scripts/verify_app_identity.sh /Applications/Koedex.app dist/Koedex.app
+   Require exit status zero and the same 更新互換性OK line. Only this direct comparison with
+   the installed app counts as proof of continuity.
 
-STEP 5: INSTALL
-1. Before running bash scripts/install_app.sh, explain that it installs dist/Koedex.app to
-   /Applications, which is now clear because of step 1. Wait for my approval.
-2. After approval, run bash scripts/install_app.sh with no arguments. Do not switch to a
-   manual copy or alternate destination.
-3. Verify the installed bundle ID, deep strict signature, and identity continuity (signer
-   fingerprint) against the app you set aside, then report the results.
+STEP 5: SWITCH OVER (ONE APPROVAL)
+1. After the build succeeds, explain all warnings and the following actions together; ask
+   once for approval: quit Koedex, move the old app to ~/Developer/Koedex-backups/Koedex-<old version>.app
+   (automatically add -2, -3 before .app if occupied), install, and verify. Never use Desktop.
+2. After approval, perform those actions, running bash scripts/install_app.sh with no arguments.
+   Never overwrite a backup or switch to a manual copy or alternate install destination.
+   If install_app.sh exits non-zero, confirm /Applications/Koedex.app does not exist, move
+   the set-aside app back to /Applications/Koedex.app (covered by this same approval),
+   confirm it opens, then stop and report.
+3. Run bash scripts/verify_app_identity.sh <set-aside app path> /Applications/Koedex.app and
+   require exit status zero and the 更新互換性OK line, then report the results.
 
 STEP 6: CHECK PERMISSIONS
-1. Launch Koedex and confirm Microphone, Speech Recognition, and Accessibility are still
+1. Launch Koedex with open /Applications/Koedex.app (explicit path; never open -a or -b) and confirm マイク / Microphone, 音声認識 / Speech Recognition, and アクセシビリティ / Accessibility are still
    granted, either in the setup screen or in System Settings. **Normally this carries over
    with no action needed.**
 2. If any permission shows as already granted on screen yet recording or pasting still does
    not work, and Koedex does not appear at all in System Settings → Privacy & Security →
-   Microphone/Speech Recognition/Accessibility, this may be a leftover macOS permission
+   マイク / Microphone・音声認識 / Speech Recognition・アクセシビリティ / Accessibility, this may be a leftover macOS permission
    (TCC) record from the earlier install. Only if you actually observe this symptom, explain
    that you will run these three commands, and wait for my approval:
    - tccutil reset Microphone com.koedex.app
@@ -2559,11 +2639,12 @@ STEP 6: CHECK PERMISSIONS
    this symptom, do not run tccutil reset.
 
 DO NOT CHANGE
-- Do not modify anything under ~/.codex/.
+- Do not hand-edit Codex settings or credentials under ~/.codex/. Codex CLI saving its own
+  state during normal operation is fine.
 - Do not reset TCC permissions unless you actually observed the symptom above, and even then
   only for Koedex's own three permissions (Microphone / SpeechRecognition / Accessibility,
   com.koedex.app) — never for any other app or permission.
-- Outside step 1, do not automatically delete an existing app, old certificate, Keychain
+- Do not automatically delete an existing app, old certificate, Keychain
   item, Koedex settings, or history.
 - Do not delete or overwrite the clone folder from the original install.
 - Do not fetch or run scripts from outside the repository or install new software on your
@@ -2571,11 +2652,22 @@ DO NOT CHANGE
 - Do not independently use sudo, delete or overwrite files, disable Gatekeeper, or broadly
   remove quarantine attributes.
 
+MANUAL FINAL CHECK
+Ask me to open TextEdit, press fn, say a short sentence, press fn again, and check that
+text appears. This check is manual only. If any other UI automation takes more than
+1–2 minutes, switch to manual instructions. Permission names are マイク / Microphone,
+音声認識 / Speech Recognition, and アクセシビリティ / Accessibility; names may vary slightly
+by macOS version.
+
+Restore: before switch-over the old app is still in /Applications. After switch-over, quit
+Koedex and, with approval, move the new app to a fresh folder without overwriting anything,
+then return the backup to /Applications/Koedex.app. Never delete either app automatically.
+
 FINAL REPORT
 1. Working location and the verified origin, tag, and HEAD
 2. Every preflight, build (including the --previous-app continuity result), install, and
    signature PASS/WARN/FAIL
-3. Where the set-aside old app is (~/Desktop/Koedex-old.app), that it's safe to delete once
+3. Where the set-aside old app is (~/Developer/Koedex-backups/Koedex-<old version>.app), that it's safe to delete once
    I'm satisfied, and that deleting it is my decision, not yours
 4. Whether permissions carried over automatically, or whether an old TCC record was found
    and reset

@@ -138,12 +138,12 @@ extended attributes in place, so it does not fix the problem.**
 #### Get the source
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_EN -->
-Clone only the single point tagged `v0.2.0` from the official repository. Do not take the latest
+Clone only the single point tagged `v0.2.1` from the official repository. Do not take the latest
 state (`main`) — take this release and nothing else. Do not run this where a folder named `Koedex`
 already exists.
 
 ```bash
-git clone --branch v0.2.0 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.2.1 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -153,7 +153,7 @@ Inside the folder the clone created, paste and run the following as-is.
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.2.0"
+EXPECTED_TAG="v0.2.1"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -179,11 +179,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 If even one ❌ appears, stop there. Do not switch to a different URL, a different tag, a ZIP
 download, a mirror, or any other way of obtaining the source.
 
-A tag can be moved later, so also confirm on GitHub's Releases page that `v0.2.0` is published as
+A tag can be moved later, so also confirm on GitHub's Releases page that `v0.2.1` is published as
 an immutable release. If you have the GitHub CLI, you can confirm the same thing with:
 
 ```bash
-gh release verify v0.2.0 --repo GrShin5/Koedex
+gh release verify v0.2.1 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_EN -->
 
@@ -330,36 +330,52 @@ until it restarts.
 
 `scripts/install_app.sh` refuses to overwrite an existing
 `/Applications/Koedex.app` — it fails with an error rather than replacing
-anything there. So updating to a new release means: move the old app aside
-first, then install the new one into the now-empty spot.
+anything there. Build and verify the new release first. Then move the old app to a backup and install.
 
 To let an agent perform this update, copy the prompt from
 [docs/agent-update-prompt.md](docs/agent-update-prompt.md).
 
-1. Move the currently installed app out of the way instead of deleting it:
-   `mv /Applications/Koedex.app ~/Desktop/Koedex-old.app` (any destination
-   outside `/Applications` works).
-2. Clone the new release tag into a **fresh** folder, exactly as described in
-   [Get the source](#get-the-source) above — don't reuse or update the old
-   clone in place.
-3. Build it: `./scripts/make_app.sh release`. If you kept the app you moved
-   aside, you can add `--previous-app ~/Desktop/Koedex-old.app` so the build
-   verifies signing continuity against it and prints
+1. Read-only: check that `/Applications/Koedex.app` exists and read its version.
+2. Clone `v0.2.1` into `~/Developer/Koedex-v0.2.1`. If occupied, automatically use
+   `-2`, `-3`, and so on. Never delete, overwrite, or reuse an existing folder.
+   Verify the official source, tag, HEAD, and immutable release as described in
+   [the update prompt](docs/agent-update-prompt.md) before running any repository script.
+3. Run `bash scripts/preflight.sh` without `--install`. Exactly one WARN about the existing
+   app is expected. If the SwiftUI component check FAILs, stop before building and follow
+   its guidance. If Xcode is already installed, retry only the failing build/check command
+   with `DEVELOPER_DIR=<existing /Applications/Xcode*.app>/Contents/Developer`.
+   Do not change system settings or run `xcode-select -s`.
+4. Keep the old app in `/Applications` and run
+   `./scripts/make_app.sh release --previous-app /Applications/Koedex.app`.
+   Require exit code zero, a valid deep strict signature, and the line
    `更新互換性OK: bundle ID、Designated Requirement、署名者証明書は連続しています。`
-4. Install it: `bash scripts/install_app.sh`. This only works now because step
-   1 cleared `/Applications/Koedex.app`.
+   The ⚠️ line saying `/Applications/Koedex.app` already exists is expected. Stop on
+   `error:`, signing failure, "cannot be verified as a stable signature", or any other
+   script-printed ⚠️ line. Report compiler warnings; they alone do not require stopping.
+   Then confirm continuity directly against the installed app:
+   `bash scripts/verify_app_identity.sh /Applications/Koedex.app dist/Koedex.app`
+   must exit with zero and print the same line.
+5. Only after the build succeeds, switch over in one go (an agent explains any warnings and
+   asks for approval once here): quit Koedex and move the old app to
+   `~/Developer/Koedex-backups/Koedex-<old version>.app` (add `-2`, `-3` before `.app` if occupied).
+   Run `bash scripts/install_app.sh` with no arguments and verify bundle ID, deep strict
+   signature, and signer continuity. Never overwrite an app or backup. Never use Desktop.
+   If `install_app.sh` fails, move the backup straight back to `/Applications/Koedex.app`.
+6. Check permissions. Use `tccutil` only for the broken-permission symptom described below.
+7. Manually open TextEdit, press fn, say a short sentence, press fn again, and check that
+   text is inserted. If other UI automation takes more than 1–2 minutes, use manual steps.
 
 **Your permissions carry over — you do not need to grant them again.** The
 bundle identifier and the signing identity stay the same across a build made
 from this repository, and `scripts/make_app.sh` checks that continuity itself
-(see step 3). macOS ties Microphone, Speech Recognition, and Accessibility
+(see step 4). macOS ties マイク / Microphone, 音声認識 / Speech Recognition, and アクセシビリティ / Accessibility
 grants to that identity, not to the specific `.app` file, so the new build
 inherits what you already granted the old one.
 
 **But updating does not fix a permission that is already broken.** If Koedex
 shows a permission as already granted yet recording or pasting still doesn't
 work, and Koedex doesn't appear at all in System Settings → Privacy &
-Security → Microphone/Speech Recognition/Accessibility, that's a leftover
+Security → マイク / Microphone・音声認識 / Speech Recognition・アクセシビリティ / Accessibility, that's a leftover
 macOS permission record (TCC) from an earlier install on this Mac — updating
 the app doesn't touch it. This was confirmed on a real affected Mac. To clear
 it: quit Koedex, then run these three commands **without `sudo`**:
@@ -372,6 +388,8 @@ tccutil reset Accessibility com.koedex.app
 
 Then reopen Koedex and grant the three permissions normally, as in
 [Granting the three permissions](#granting-the-three-permissions) above.
+
+Permission display names may vary slightly by macOS version.
 
 ## Usage
 

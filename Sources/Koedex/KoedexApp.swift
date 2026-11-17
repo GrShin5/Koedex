@@ -3174,7 +3174,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
             }
         }
 
-        recordingStartTask = Task {
+        recordingStartTask = Task { [self] in
             defer {
                 if self.recordingStartTaskSessionID == session.id {
                     self.recordingStartTask = nil

@@ -198,7 +198,10 @@ fi
 TARGET_APP_IS_STABLE=false
 EXTERNAL_REFERENCE_IS_STABLE=false
 if [[ -d "$TARGET_APP_DIR" ]]; then
-  target_signer="$(bash "$ROOT_DIR/scripts/verify_app_identity.sh" --signer-fingerprint "$TARGET_APP_DIR" 2>/dev/null || true)"
+  target_error_file="$(mktemp)"
+  target_signer="$(bash "$ROOT_DIR/scripts/verify_app_identity.sh" --signer-fingerprint "$TARGET_APP_DIR" 2>"$target_error_file" || true)"
+  target_error="$(cat "$target_error_file" 2>/dev/null || true)"
+  rm -f "$target_error_file"
   if [[ -n "$target_signer" ]]; then
     target_signer="$(printf '%s' "$target_signer" | tr '[:lower:]' '[:upper:]')"
     if [[ "$target_signer" != "$SIGN_IDENTITY" ]]; then
@@ -214,12 +217,16 @@ EOF
     TARGET_APP_IS_STABLE=true
   else
     echo "注意: 既存の$(basename "$TARGET_APP_DIR")は安定署名として検証できません。" >&2
+    if [[ -n "$target_error" ]]; then printf '%s\n' "$target_error" | sed -n '1,5s/^/      /p' >&2; fi
     echo "      不安定署名版からの初回移行では、macOSで一度だけ権限の再許可が必要になる場合があります。" >&2
   fi
 fi
 
 if [[ -n "$PREVIOUS_APP_PATH" && "$PREVIOUS_APP_PATH" != "$TARGET_APP_DIR" ]]; then
-  external_signer="$(bash "$ROOT_DIR/scripts/verify_app_identity.sh" --signer-fingerprint "$PREVIOUS_APP_PATH" 2>/dev/null || true)"
+  external_error_file="$(mktemp)"
+  external_signer="$(bash "$ROOT_DIR/scripts/verify_app_identity.sh" --signer-fingerprint "$PREVIOUS_APP_PATH" 2>"$external_error_file" || true)"
+  external_error="$(cat "$external_error_file" 2>/dev/null || true)"
+  rm -f "$external_error_file"
   if [[ -n "$external_signer" ]]; then
     external_signer="$(printf '%s' "$external_signer" | tr '[:lower:]' '[:upper:]')"
     if [[ "$external_signer" != "$SIGN_IDENTITY" ]]; then
@@ -235,6 +242,8 @@ EOF
     EXTERNAL_REFERENCE_IS_STABLE=true
   else
     echo "注意: --previous-appで指定したアプリは安定署名として検証できません。" >&2
+    if [[ -n "$external_error" ]]; then printf '%s\n' "$external_error" | sed -n '1,5s/^/      /p' >&2; fi
+    echo "      DesktopやiCloudへの移動で追加属性が付くと検証に失敗する場合があります。ビルド成功まで旧アプリを /Applications に置いてください。" >&2
     echo "      不安定署名版からの初回移行では、macOSで一度だけ権限の再許可が必要になる場合があります。" >&2
   fi
 fi
@@ -302,9 +311,9 @@ cat > "$CONTENTS_DIR/Info.plist" << PLIST
     <key>CFBundleIdentifier</key>
     <string>$BUNDLE_IDENTIFIER</string>
     <key>CFBundleVersion</key>
-    <string>0.2.0</string>
+    <string>0.2.1</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.2.0</string>
+    <string>0.2.1</string>
     <key>KoedexBuildGitSHA</key>
     <string>$BUILD_GIT_SHA</string>
     <key>CFBundlePackageType</key>

@@ -207,7 +207,12 @@ enum RunLoopApplicationTermination {
     static let runLoopModes: [RunLoop.Mode] = [.default, .modalPanel, .eventTracking]
 
     @MainActor
-    static func request(application: NSApplication = NSApp) {
+    static func request() {
+        request(application: NSApp)
+    }
+
+    @MainActor
+    static func request(application: NSApplication) {
         application.perform(
             #selector(NSApplication.terminate(_:)),
             with: nil,

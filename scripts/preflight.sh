@@ -30,6 +30,36 @@ if xcode-select -p >/dev/null 2>&1; then record ok "$(t "Xcode Command Line Tool
 swift_version="$(swift --version 2>/dev/null | sed -n 's/.*Apple Swift version \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -1 || true)"; swift_ok=0
 if [[ "$swift_version" =~ ^([0-9]+)\.([0-9]+)$ ]] && { [[ ${BASH_REMATCH[1]} -gt 6 ]] || { [[ ${BASH_REMATCH[1]} -eq 6 && ${BASH_REMATCH[2]} -ge 2 ]]; }; }; then swift_ok=1; fi
 if [[ $swift_ok -eq 1 ]]; then record ok "$(t "Swiftのバージョンは${swift_version}です（6.2以上）" "Swift version is ${swift_version} (6.2 or later)")"; else record fail "$(t "Swift 6.2以上が必要です（検出値: ${swift_version:-不明}）" "Swift 6.2 or later is required (detected: ${swift_version:-unknown})")"; ACTION_ITEMS+=("$(t "\`softwareupdate --list\` を確認し、Swift 6.2以降を含む更新を導入してください。" "Check \`softwareupdate --list\` and install an update that includes Swift 6.2 or later.")"); fi
+# This check creates and deletes a temporary file.
+if [[ $swift_ok -eq 1 ]]; then
+  macro_ok=0
+  if macro_dir="$(mktemp -d)"; then
+    trap 'rm -rf "$macro_dir"' EXIT
+    if printf '%s\n' 'import SwiftUI' 'struct MacroCheck: View { @State private var value = false; var body: some View { Text("check") } }' > "$macro_dir/check.swift"; then
+      if macro_output="$(swiftc -typecheck "$macro_dir/check.swift" 2>&1)"; then macro_ok=1; fi
+    fi
+    rm -rf "$macro_dir"
+    trap - EXIT
+  fi
+  if [[ $macro_ok -eq 1 ]]; then
+    record ok "$(t "SwiftUIの部品（マクロ）を確認しました" "SwiftUI components (macros) were verified")"
+  else
+    record fail "$(t "SwiftUIの部品（マクロ）を確認できません" "SwiftUI components (macros) could not be verified")"
+    xcode_path=""
+    for candidate in /Applications/Xcode*.app; do [[ -d "$candidate" ]] && { xcode_path="$candidate"; break; }; done
+    if [[ -n "$xcode_path" ]]; then
+      ACTION_ITEMS+=("$(t "Xcodeが見つかりました。システム設定は変えずに、このチェックとビルドのコマンドだけ先頭に DEVELOPER_DIR=\"${xcode_path}/Contents/Developer\" を付けて再実行できます。" "Xcode was found. Without changing system settings, you can rerun only this check and the build command prefixed with DEVELOPER_DIR=\"${xcode_path}/Contents/Developer\".")")
+    else
+      ACTION_ITEMS+=("$(t "ソフトウェアアップデートでCommand Line Toolsを更新するか、Xcodeをインストールしてください。" "Update Command Line Tools through Software Update or install Xcode.")")
+    fi
+    if [[ -n "${macro_output:-}" ]]; then
+      ACTION_ITEMS+=("$(t "検査の出力（先頭3行）" "Check output (first 3 lines)"): $(printf '%s\n' "$macro_output" | head -n 3 | tr '\n' ' ')")
+    fi
+    if [[ ${SDKROOT+x} || ${DEVELOPER_DIR+x} ]]; then
+      ACTION_ITEMS+=("$(t "現在の環境" "Current environment"): SDKROOT=${SDKROOT-$(t "未設定" "unset")}, DEVELOPER_DIR=${DEVELOPER_DIR-$(t "未設定" "unset")}")
+    fi
+  fi
+fi
 if command -v codex >/dev/null 2>&1; then
   codex_version_output="$(codex --version 2>&1 || true)"
   codex_version="$(printf '%s\n' "$codex_version_output" | sed -n '/^codex-cli /{p;q;}' || true)"
@@ -75,7 +105,7 @@ if [[ $provider -eq 0 ]]; then record ok "$(t "リポジトリのパスはiCloud
 if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then [[ -z "$(git -C "$ROOT_DIR" status --porcelain 2>/dev/null)" ]] && record ok "$(t "Git cloneはcleanです" "The Git clone is clean")" || record warn "$(t "Git cloneに未コミット変更があります" "The Git clone has uncommitted changes")"; else record fail "$(t "Git cloneとして確認できません" "This location is not a Git clone")"; fi
 
 # Existing install is non-destructive normally and a hard failure for --install.
-if koedex_install_target_exists /Applications/Koedex.app; then if [[ $INSTALL -eq 1 ]]; then record fail "$(t "/Applications/Koedex.app が既に存在します（app・通常file・symlinkを上書きしません）" "/Applications/Koedex.app already exists (app, regular file, and symlink are never overwritten)")"; ACTION_ITEMS+=("$(t "既存のKoedex.appを残すか手動で削除するかを判断してください。このスクリプトは変更しません。" "Decide whether to keep or manually remove the existing Koedex.app. This script will not change it.")"); else record warn "$(t "/Applications/Koedex.app が既に存在します。上書きする前に内容を確認してください" "/Applications/Koedex.app already exists. Check it before overwriting.")"; fi; else record ok "$(t "/Applications/Koedex.app はまだ存在しません" "/Applications/Koedex.app does not exist yet")"; fi
+if koedex_install_target_exists /Applications/Koedex.app; then if [[ $INSTALL -eq 1 ]]; then record fail "$(t "/Applications/Koedex.app が既に存在します（app・通常file・symlinkを上書きしません）" "/Applications/Koedex.app already exists (app, regular file, and symlink are never overwritten)")"; ACTION_ITEMS+=("$(t "既存のKoedex.appを残すか手動で削除するかを判断してください。このスクリプトは変更しません。" "Decide whether to keep or manually remove the existing Koedex.app. This script will not change it.")"); else record warn "$(t "/Applications/Koedex.app が既に存在します。更新では想定どおりです（このスクリプトは何も上書きしません）" "/Applications/Koedex.app already exists. This is expected when updating (this script overwrites nothing).")"; fi; else record ok "$(t "/Applications/Koedex.app はまだ存在しません" "/Applications/Koedex.app does not exist yet")"; fi
 available_kb="$(df -k "$ROOT_DIR" 2>/dev/null | awk 'NR==2 {print $4}' || true)"; [[ "$available_kb" =~ ^[0-9]+$ && "$available_kb" -ge 2097152 ]] && record ok "$(t "空きディスク容量は2GB以上あります" "At least 2GB of disk space is available")" || { record fail "$(t "空きディスク容量が不足しています（必要2GB以上）" "Not enough free disk space (2GB or more is required)")"; ACTION_ITEMS+=("$(t "空き容量を2GB以上確保してください。" "Free up at least 2GB of disk space.")"); }
 
 print_report() { echo "$(t "=== Koedexビルド前提条件チェック ===" "=== Koedex build prerequisite check ===")"; printf '%s\n' "${RESULT_LINES[@]}"; if [[ ${#ACTION_ITEMS[@]} -gt 0 ]]; then echo ""; echo "$(t "=== あなたがやること ===" "=== What you need to do ===")"; local i=1; for action in "${ACTION_ITEMS[@]}"; do echo "$i. $action"; i=$((i + 1)); done; fi; }

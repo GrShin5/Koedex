@@ -398,30 +398,45 @@ AI エージェントに任せる方法（(a)・(b)）で使う `scripts/install
 `/Applications/Koedex.app` が既に存在するとエラーで停止し、**上書きしません。**
 そのため更新は、次の順番で行います。
 
-1. 今インストールされている `Koedex.app` を、削除せずに `/Applications` の外へ
-   移動します（例：デスクトップへドラッグ）。
-2. **新しいフォルダへ**、新しいリリースタグをあらためて clone します。既存の clone
-   フォルダをそのまま更新して使い回さないでください（手順は (a)・(b)・(c) いずれも
-   [17. 付録A](#17-付録aaiエージェントに導入を任せる)または
-   [18. 付録B](#18-付録b自分でソースからビルドする)と同じです）。
-3. ビルドします。手順1で退避した古いアプリを残してある場合、
-   `./scripts/make_app.sh release --previous-app <退避先のパス>` のように
-   `--previous-app` を付けると、ビルドが新旧の署名の連続性を検証し、
+1. 読み取り専用で `/Applications/Koedex.app` の存在とバージョンを確認します。
+2. `v0.2.1`を `~/Developer/Koedex-v0.2.1` へcloneします。存在したら自動で末尾に
+   `-2`、`-3`と付けます。既存フォルダは削除・上書き・再利用しません。
+   スクリプトを実行する前に、[更新プロンプト](../agent-update-prompt.md)のとおり
+   公式取得元、tag、HEAD、変更不能なreleaseを照合します。
+3. `--install`を付けずに `bash scripts/preflight.sh` を実行します。既存appのWARNが
+   ちょうど1件出るのは想定どおりです。SwiftUIコンポーネントの確認がFAILならビルド前に
+   止め、その案内に従います。Xcodeが既にある場合だけ、失敗したビルド・確認コマンドだけに
+   `DEVELOPER_DIR=<既存の /Applications/Xcode*.app>/Contents/Developer`を指定して再実行できます。
+   システム設定の変更や `xcode-select -s` は行いません。
+4. 旧appを `/Applications` に残したまま、
+   `./scripts/make_app.sh release --previous-app /Applications/Koedex.app` を実行します。
+   終了コード0、有効なdeep strict署名、次の行を確認します。
    `更新互換性OK: bundle ID、Designated Requirement、署名者証明書は連続しています。`
-   と表示します。
-4. `/Applications` が手順1で空いているので、`scripts/install_app.sh` を使うか
-   （または手動で `dist/Koedex.app` を `/Applications` へドラッグして）新しいアプリを
-   配置します。
+   `/Applications/Koedex.app`が既に存在するという⚠️行は想定どおりです。`error:`、署名失敗、
+   「安定署名として検証できません」、それ以外のスクリプト自身の⚠️行では停止します。
+   コンパイラ警告は報告しますが、それだけでは停止しません。続けて、導入済みアプリと直接比べます。
+   `bash scripts/verify_app_identity.sh /Applications/Koedex.app dist/Koedex.app` が
+   終了コード0で同じ行を出すことを確認します。
+5. ビルドが成功した後だけ、まとめて切り替えます（エージェントに任せる場合は、ここで警告と
+   切替操作をまとめて説明し、承認を1回だけ求めます）。Koedexを終了し、
+   旧appを `~/Developer/Koedex-backups/Koedex-<旧バージョン>.app` へ移します。
+   存在したら`.app`の前に `-2`、`-3`と付けます。`bash scripts/install_app.sh` を引数なしで
+   実行し、bundle ID、deep strict署名、署名の連続性を確認します。appやバックアップは
+   上書きせず、Desktopにも移しません。`install_app.sh`が失敗したら、バックアップをすぐに
+   `/Applications/Koedex.app`へ戻します。
+6. 権限を確認します。`tccutil`は後述の権限不具合の症状がある場合だけ使います。
+7. 手動でテキストエディットを開き、fnを押し、短い文を話し、再びfnを押して文字が入るか
+   確認します。それ以外のUI自動操作が1〜2分で終わらない場合も手動に切り替えます。
 
 **権限はそのまま引き継がれます。あらためて許可し直す必要はありません。** このリポジトリから
 ビルドする限り、bundle ID と署名 identity は変わらず、`scripts/make_app.sh` 自身が
-その連続性を検証します（手順3参照）。macOS はマイク・音声認識・アクセシビリティの許可を、
+その連続性を検証します（手順4参照）。macOS はマイク / Microphone・音声認識 / Speech Recognition・アクセシビリティ / Accessibilityの許可を、
 個々の `.app` ファイルではなくこの identity に紐付けているため、新しいビルドは古いアプリへ
 許可した内容をそのまま引き継ぎます。
 
 **ただし、すでに壊れている権限は、更新しても直りません。** 画面の権限表示が「許可済み」に
 なっているのに録音や貼り付けが動かず、しかもシステム設定 →「プライバシーとセキュリティ」→
-マイク／音声認識／アクセシビリティのどの一覧にも Koedex が表示されない場合、それはこの Mac に
+マイク / Microphone・音声認識 / Speech Recognition・アクセシビリティ / Accessibilityのどの一覧にも Koedex が表示されない場合、それはこの Mac に
 以前あったインストールが残した古い macOS 権限（TCC）の記録です。アプリを更新しても、この記録は
 変わりません。実際に不具合のあった Mac で、この対処により解消することを確認しています。
 対処するには、Koedex を終了してから、次の3つを **`sudo` を付けずに** 実行してください。
@@ -436,6 +451,8 @@ tccutil reset Accessibility com.koedex.app
 通常どおり許可し直してください。
 
 ---
+
+表示名はmacOSの版により少し異なる場合があります。
 
 ## 6. 初回セットアップ
 
@@ -2045,15 +2062,18 @@ AI エージェントは「ここであなたの操作が必要です」と伝�
 
 ### 作業場所と推奨モデル
 
-既定の親フォルダは `~/Developer`、新しいcloneは `~/Developer/Koedex` です。
-`~/Developer`を使えない場合だけ、`~/Downloads/Koedex`を使います。Desktop、Documents、
-iCloud Drive、File Provider配下、symlink、以前のcloneは避けてください。
+既定の親フォルダは `~/Developer` です。新しい導入は `~/Developer/Koedex`、更新は
+`~/Developer/Koedex-v0.2.1` へcloneします。そのフォルダが既にある場合は、エージェントが自動で
+末尾に`-2`、`-3`と付け、既存フォルダを削除・再利用することはありません。`~/Developer`を
+使えない場合だけ、`~/Downloads`を使います。Desktop、Documents、iCloud Drive、File Provider配下、
+symlink、以前のcloneは避けてください。
 
-2026-08-24時点の推奨は、Codexが `GPT-5.6-Terra` / `medium`、Claude Codeが利用可能なら
-`Sonnet 5` / `medium`、なければ `default` / `medium` です。effortを選べない環境では
+2026-11-17時点の推奨は、Codexが `GPT-6.1-Sol` / `medium`、Claude Codeが利用可能なら
+`Sonnet 5.5` / `medium`、なければ `default` / `medium` です。effortを選べない環境では
 既定値で構いません。Claude Codeの可用性と設定方法は実行時に
 [公式資料](https://code.claude.com/docs/en/model-config)で確認してください。これは導入を担当する
-エージェントの設定で、Koedexアプリ内のAIモデル設定とは別です。
+エージェントの設定で、Koedexアプリ内のAIモデル設定とは別です。選択肢にないモデルやeffortを
+無理に指定する必要はありません。
 
 ### 方法1：デスクトップアプリの AI エージェントに任せる
 
@@ -2139,19 +2159,22 @@ KoedexというmacOSアプリを、公式GitHubリポジトリから取得して
 
 【固定する取得元】
 - 公式URL: https://github.com/GrShin5/Koedex.git
-- リリースタグ: v0.2.0
+- リリースタグ: v0.2.1
 - 検証方式: GitHub immutable release
 
 【作業場所】
 1. 既定の親フォルダは ~/Developer、clone先は ~/Developer/Koedex としてください。
 2. ~/Developerを作成・使用できない場合だけ、~/Downloads/Koedexを候補にしてください。
 3. Desktop、Documents、iCloud Drive、File Provider配下、symlink先では作業しないでください。
-4. clone先がすでに存在する、中身がある、symlinkである、または既存cloneに未commit変更がある
-   場合は、削除・上書き・再利用せず、場所と状態を平易に報告して止まってください。
+4. clone先が存在する場合（symlinkも含む）は、自動で末尾に-2、-3と付けて空いている名前を
+   選んでください。既存フォルダは削除・上書き・再利用しないでください。
 
 【進め方】
+- 計画モードまたは読み取り専用モードなら、1文でその状態を伝え、コマンド実行とファイル変更ができるモードへの切替方法を示してください。コマンド実行前に確認が出る通常モードで十分で、全権限モードや確認省略モードを求めないでください。計画だけを黙って返さないでください。
 - 小さな確認を1件ずつ出さず、最初に読み取り専用の事前チェックを最後まで行い、結果と私に
   必要な作業を一括で報告してください。
+- 報告だけを理由に待たないでください。止まるのは、下の承認、必須チェックの失敗、私にしか
+  できない操作のときだけです。それ以外は次の手順へ進んでください。
 - ただし、Keychainの変更、/Applicationsへの書込み、Gatekeeper、macOS権限など、安全上必要な
   承認は実行直前に、何が変わるかを説明して私の承認を待ってください。確認回数を固定しないで
   ください。
@@ -2159,16 +2182,37 @@ KoedexというmacOSアプリを、公式GitHubリポジトリから取得して
   1回再実行して構いません。別URL、別ref、ミラー、ダウンロードZIP、別のインストール方式へ
   独断で切り替えないでください。
 
+- sandboxや制限された環境での失敗は「なし」ではなく「未確認」です。たとえば
+  "cannot reach GitHub"や"0 certificates found"だけでは不在と判断できません。
+  結論を出す前に、必要なアクセスの承認を求め、同じ読み取り専用コマンドを再実行してください。
+- コンパイラ警告は報告しますが、それだけで止めないでください。ビルドでは、終了コードが0以外、
+  error:、署名失敗、スクリプト自身が出す⚠️行で停止してください。他の安全確認も維持してください。
+
+【停止するたびに示すこと】
+必ず6項目を示してください。①完了したこと ②停止理由 ③Koedexがもう使える状態か（未確認なら明記）
+④推奨する選択と、そのまま送れる返信例「この内容で進めて」など ⑤承認後に自動で進む作業
+⑥元に戻す方法。必須チェックに失敗した場合は、その修正と再確認を推奨し、省略を勧めないでください。
+「指示待ち」だけで返信を終えないでください。
+
+【最後の手動確認】
+私にテキストエディットを開き、fnを押し、短い文を話し、もう一度fnを押して、文字が入るか
+確認するよう案内してください。この確認は手動だけで行います。それ以外のUI自動操作が
+1〜2分で終わらない場合も手動の案内に切り替えてください。権限名は、マイク / Microphone、
+音声認識 / Speech Recognition、アクセシビリティ / Accessibilityです。macOSの版によって
+表示名が少し異なる場合があります。
+
 【取得と照合】
-1. 選んだ新規clone先へ、次の内容と等価な方法でv0.2.0をcloneしてください。
-   git clone --branch v0.2.0 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
+0. clone前に、読み取り専用で /Applications/Koedex.app があるか確認してください。ある場合は止まり、
+   docs/agent-update-prompt.md を使うよう案内してください。削除は勧めないでください。
+1. 選んだ新規clone先へ、次の内容と等価な方法でv0.2.1をcloneしてください。
+   git clone --branch v0.2.1 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
 2. clone直後、スクリプトを1つも実行する前に、次をすべて確認してください。
    - originのfetch URLが https://github.com/GrShin5/Koedex.git と一致する
      （比較時だけ末尾の.gitの有無を同一視して構いません）
-   - ローカルのv0.2.0 tagが指すcommitとHEADが完全一致する
-   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.2.0もHEADと完全一致する
-   - GitHub公式APIのreleases/tags/v0.2.0が、tag_name=v0.2.0かつimmutable=trueを返す
-   - GitHub CLIをすでに利用できる場合は、gh release verify v0.2.0 --repo GrShin5/Koedexも成功する
+   - ローカルのv0.2.1 tagが指すcommitとHEADが完全一致する
+   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.2.1もHEADと完全一致する
+   - GitHub公式APIのreleases/tags/v0.2.1が、tag_name=v0.2.1かつimmutable=trueを返す
+   - GitHub CLIをすでに利用できる場合は、gh release verify v0.2.1 --repo GrShin5/Koedexも成功する
    - checkoutがcleanで、未追跡ファイルもない
 3. 1つでも一致しない、releaseが存在しない・immutableでない、取得結果を確認できない、
    別refへ誘導された場合は、
@@ -2202,18 +2246,22 @@ Keychainへアクセスできない状態を「証明書なし」や「署名破
    検証し、結果を報告してください。
 
 【変更してはいけないもの】
-- ~/.codex/配下を変更しないでください。
+- ~/.codex/内のCodex設定や認証情報を手で編集しないでください。Codex CLIが通常動作で
+  自身の状態を保存することは構いません。
 - TCC権限をresetしないでください。
 - 既存app、古い証明書、Keychain項目、Koedexの設定や履歴を自動削除しないでください。
 - リポジトリ外のスクリプトを取得・実行せず、新しいソフトウェアを勝手にインストールしないで
   ください。
 - sudo、削除、上書き、Gatekeeper無効化、quarantine属性の一括削除を独断で行わないでください。
 
+戻し方：承認を得てKoedexを終了し、導入したappを新規バックアップフォルダへ移します。
+アプリデータ、権限、証明書は自動削除しないでください。
+
 【完了報告】
 1. 実際に使った作業場所、origin、tag、HEADの照合結果
 2. preflight、build、install、署名検証のPASS/WARN/FAIL
 3. 私がFinderで初回起動する手順と、Gatekeeperに止められた場合の安全な開き方
-4. マイク・音声認識・アクセシビリティ権限の許可手順
+4. マイク / Microphone・音声認識 / Speech Recognition・アクセシビリティ / Accessibility権限の許可手順
 5. Codex CLI接続確認と、接続できない場合の対処
 6. 旧アプリを削除しても権限や以前の署名が残る場合があり、自動reset・自動削除はしていないこと
 ```
@@ -2254,11 +2302,11 @@ swift --version
 ### 手順1：リポジトリを clone する
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_JA -->
-公式リポジトリから、リリース `v0.2.0` の一点だけを clone します。最新の状態（`main`）ではなく、
+公式リポジトリから、リリース `v0.2.1` の一点だけを clone します。最新の状態（`main`）ではなく、
 この版だけを取得してください。`Koedex` という名前のフォルダが既にある場所では実行しないでください。
 
 ```bash
-git clone --branch v0.2.0 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.2.1 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -2268,7 +2316,7 @@ clone してできたフォルダの中で、以下をそのまま貼り付け�
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.2.0"
+EXPECTED_TAG="v0.2.1"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -2294,11 +2342,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 ❌ が1つでも出たら、そこで中止してください。別のURL、別のタグ、ZIPダウンロード、ミラーなど、
 別の取得方法へ切り替えないでください。
 
-タグはあとから移動されうるため、GitHub の Releases 画面で `v0.2.0` が immutable release として
+タグはあとから移動されうるため、GitHub の Releases 画面で `v0.2.1` が immutable release として
 公開されていることも確認してください。GitHub CLI を使える場合は、次のコマンドでも確認できます。
 
 ```bash
-gh release verify v0.2.0 --repo GrShin5/Koedex
+gh release verify v0.2.1 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_JA -->
 
@@ -2378,8 +2426,8 @@ swift build
 
 | 項目 | 内容 |
 | --- | --- |
-| 対象リリース | v0.2.0 |
-| 対象アプリバージョン | 0.2.0 |
+| 対象リリース | v0.2.1 |
+| 対象アプリバージョン | 0.2.1 |
 | 説明書の言語 | 日本語 |
 
 この説明書は、上記のリリース時点のソースコードをもとに書かれています。
@@ -2425,47 +2473,59 @@ KoedexというmacOSアプリを、公式GitHubリポジトリの新しいリリ
 
 【固定する取得元】
 - 公式URL: https://github.com/GrShin5/Koedex.git
-- リリースタグ: v0.2.0
+- リリースタグ: v0.2.1
 - 検証方式: GitHub immutable release
 
 【作業場所】
-1. 新しいclone先は ~/Developer/Koedex-update としてください。
-2. ~/Developerを作成・使用できない場合だけ、~/Downloads/Koedex-updateを候補にしてください。
+1. 新しいclone先は ~/Developer/Koedex-v0.2.1 としてください。
+2. ~/Developerを作成・使用できない場合だけ、~/Downloads/Koedex-v0.2.1を候補にしてください。
 3. 以前の導入で使ったcloneフォルダ（例：~/Developer/Koedex）は、削除・上書き・再利用せず、
    そのまま残してください。新しいcloneは必ず別名の新規フォルダに作ってください。
 4. Desktop、Documents、iCloud Drive、File Provider配下、symlink先では作業しないでください。
-5. 新しいclone先がすでに存在する場合は、削除・上書き・再利用せず、状態を平易に報告して
-   止まってください。
+5. clone先が存在する場合（symlinkも含む）は、自動で末尾に-2、-3と付けて空いている名前を
+   選んでください。既存フォルダは削除・上書き・再利用しないでください。
 
 【進め方】
+- 計画モードまたは読み取り専用モードなら、1文でその状態を伝え、コマンド実行とファイル変更ができるモードへの切替方法を示してください。コマンド実行前に確認が出る通常モードで十分で、全権限モードや確認省略モードを求めないでください。計画だけを黙って返さないでください。
 - 小さな確認を1件ずつ出さず、最初に読み取り専用の事前チェックを最後まで行い、結果と私に
   必要な作業を一括で報告してください。
-- ただし、/Applicationsにあるアプリの移動、Keychainの変更、/Applicationsへの新規書込み、
-  tccutil resetの実行など、安全上必要な承認は実行直前に、何が変わるかを説明して私の承認を
+- 報告だけを理由に待たないでください。止まるのは、下の承認、必須チェックの失敗、私にしか
+  できない操作のときだけです。それ以外は次の手順へ進んでください。
+- ただし、Keychainの変更、手順5の切り替え（Koedexの終了・旧アプリの退避・新しいアプリの導入を
+  まとめた1回の承認）、tccutil resetの実行の前には、何が変わるかを説明して私の承認を
   待ってください。確認回数を固定しないでください。
 - sandboxまたはnetworkの承認が原因で失敗した場合、承認後に同じURL・同じref・同じコマンドを
   1回再実行して構いません。別URL、別ref、ミラー、ダウンロードZIP、別のインストール方式へ
   独断で切り替えないでください。
 
-【手順1：現在のインストールを退避する】
-1. /Applications/Koedex.app が実際に存在することを確認してください。存在しない場合は
-   ここで止まり、docs/agent-install-prompt.md を使うよう案内してください。
-2. 実行前に、/Applications/Koedex.app を ~/Desktop/Koedex-old.app へ移動する（削除では
-   ありません）ことを説明し、承認を待ってください。
-3. 承認後、mv /Applications/Koedex.app ~/Desktop/Koedex-old.app を実行してください。
-   手作業のGUI操作で同じ結果になる場合はそれでも構いませんが、削除・ゴミ箱送りは
-   しないでください。
+- sandboxや制限された環境での失敗は「なし」ではなく「未確認」です。たとえば
+  "cannot reach GitHub"や"0 certificates found"だけでは不在と判断できません。
+  結論を出す前に、必要なアクセスの承認を求め、同じ読み取り専用コマンドを再実行してください。
+- コンパイラ警告は報告しますが、それだけで止めないでください。ビルドでは、終了コードが0以外、
+  error:、署名失敗、スクリプト自身が出す⚠️行で停止してください。ただし、/Applications/Koedex.app
+  が既に存在するという想定どおりの⚠️行（事前チェックが出し、ビルドでも再表示されます）は
+  除きます。互換性OK行がない場合も停止してください。他の安全確認も維持してください。
+
+【停止するたびに示すこと】
+必ず6項目を示してください。①完了したこと ②停止理由 ③現在のアプリが動くか（未確認なら明記）
+④推奨する選択と、そのまま送れる返信例「この内容で進めて」など ⑤承認後に自動で進む作業
+⑥元に戻す方法。必須チェックに失敗した場合は、その修正と再確認を推奨し、省略を勧めないでください。
+「指示待ち」だけで返信を終えないでください。
+
+【手順1：現在のアプリを確認する】
+読み取り専用で /Applications/Koedex.app の存在とバージョンを確認してください。存在しなければ
+停止し、docs/agent-install-prompt.mdを案内してください。ビルド成功まで旧アプリは /Applications に置いたままにし、移動も終了もしないでください。
 
 【手順2：新しいバージョンの取得と照合】
-1. 選んだ新規clone先へ、次の内容と等価な方法でv0.2.0をcloneしてください。
-   git clone --branch v0.2.0 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
+1. 選んだ新規clone先へ、次の内容と等価な方法でv0.2.1をcloneしてください。
+   git clone --branch v0.2.1 --single-branch https://github.com/GrShin5/Koedex.git <新規clone先>
 2. clone直後、スクリプトを1つも実行する前に、次をすべて確認してください。
    - originのfetch URLが https://github.com/GrShin5/Koedex.git と一致する
      （比較時だけ末尾の.gitの有無を同一視して構いません）
-   - ローカルのv0.2.0 tagが指すcommitとHEADが完全一致する
-   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.2.0もHEADと完全一致する
-   - GitHub公式APIのreleases/tags/v0.2.0が、tag_name=v0.2.0かつimmutable=trueを返す
-   - GitHub CLIをすでに利用できる場合は、gh release verify v0.2.0 --repo GrShin5/Koedexも成功する
+   - ローカルのv0.2.1 tagが指すcommitとHEADが完全一致する
+   - 公式URLへのgit ls-remoteで得たrefs/tags/v0.2.1もHEADと完全一致する
+   - GitHub公式APIのreleases/tags/v0.2.1が、tag_name=v0.2.1かつimmutable=trueを返す
+   - GitHub CLIをすでに利用できる場合は、gh release verify v0.2.1 --repo GrShin5/Koedexも成功する
    - checkoutがcleanで、未追跡ファイルもない
 3. 1つでも一致しない、releaseが存在しない・immutableでない、取得結果を確認できない、
    別refへ誘導された場合は、リポジトリ内のスクリプトを実行せず、確認できた値を表で
@@ -2473,37 +2533,52 @@ KoedexというmacOSアプリを、公式GitHubリポジトリの新しいリリ
 
 【手順3：事前チェック】
 取得元の照合がすべて通った後だけ、新しいclone内で次を実行してください。
-  bash scripts/preflight.sh --install
+  bash scripts/preflight.sh
 macOS、Swift、Command Line Tools、Codex CLI、OpenSSL 3、Keychain、空き容量、作業場所を
 含む全結果を確認し、PASS/WARN/FAILを省略せず一括報告してください。署名用の証明書は
 以前の導入で作成済みのはずです。証明書が見つからない場合だけ、
 bash scripts/make_signing_cert.sh の実行前にその内容（自己署名証明書の作成、ログイン
 キーチェーンへのimport、「常に信頼」の設定）を説明し、承認を待ってください。
 
+既存アプリについてのWARNがちょうど1件出るのは想定どおりです。「OpenSSL 3は見つかりませんが、
+証明書は作成済みです」というWARNも、更新では問題ありません。SwiftUIコンポーネントの確認が
+FAILならビルド前に止め、その案内に従ってください。Xcodeが既にある場合だけ、失敗したビルド・確認
+コマンドだけにDEVELOPER_DIR=<既存の /Applications/Xcode*.app>/Contents/Developerを指定して
+再実行できます。システム設定の変更やxcode-select -sは行わないでください。
+
 【手順4：ビルド】
 1. 次を実行してください。
-   ./scripts/make_app.sh release --previous-app ~/Desktop/Koedex-old.app
+   ./scripts/make_app.sh release --previous-app /Applications/Koedex.app
 2. 終了コードが0、dist/Koedex.appが存在、bundle IDがcom.koedex.app、deep strict署名が
    有効であることを確認してください。
 3. 出力に「更新互換性OK: bundle ID、Designated Requirement、署名者証明書は連続しています。」
-   という行が含まれることを確認してください。含まれない場合、または警告や失敗が出た場合は、
+   という行が含まれることを確認してください。/Applications/Koedex.appが既に存在するという⚠️行は
+   ここでは想定どおりです。OK行がない、「安定署名として検証できません」と表示された、または
+   終了コードが0以外、error:、署名失敗、それ以外のスクリプト自身の⚠️行が出た場合は、
    インストールに進まず、出力をそのまま報告して止まってください。
+4. 続けて bash scripts/verify_app_identity.sh /Applications/Koedex.app dist/Koedex.app を実行し、
+   終了コード0と同じ更新互換性OK行を確認してください。導入済みアプリとのこの直接比較だけを、
+   連続性の根拠にします。
 
-【手順5：インストール】
-1. bash scripts/install_app.sh の実行前に、dist/Koedex.appを/Applicationsへ新規配置する
-   ことを説明して、承認を待ってください（手順1で/Applications/Koedex.appは空いています）。
-2. 承認後に bash scripts/install_app.sh を引数なしで実行してください。手作業のcopyや
-   別名配置へ切り替えないでください。
-3. 配置後のbundle ID、deep strict署名、退避した旧appとのsigner fingerprintおよびidentity
-   continuityを検証し、結果を報告してください。
+【手順5：切替（承認は1回）】
+1. ビルド成功後、警告と次の操作をまとめて説明し、一度だけ承認を求めてください。Koedexを終了し、
+   旧appを ~/Developer/Koedex-backups/Koedex-<旧バージョン>.app へ移動します。名前が存在する
+   場合は.appの前に自動で-2、-3を付けます。続いてインストールと検証を行います。Desktopへは移動しません。
+2. 承認後、この一連の操作を行い、bash scripts/install_app.shを引数なしで実行してください。
+   バックアップの上書き、手作業のcopyや別のインストール先への切替は禁止です。
+   install_app.shが0以外で終了したら、/Applications/Koedex.appが存在しないことを確認して
+   退避した旧appを/Applications/Koedex.appへ戻し（この承認に含みます）、起動を確認してから
+   停止・報告してください。
+3. bash scripts/verify_app_identity.sh <退避した旧appのパス> /Applications/Koedex.app を実行し、
+   終了コード0と更新互換性OK行を確認して、結果を報告してください。
 
 【手順6：権限の確認】
-1. Koedexを起動し、マイク・音声認識・アクセシビリティが引き続き有効になっているか、
+1. open /Applications/Koedex.app でKoedexを起動し（パスを明示し、open -aや-bは使いません）、マイク / Microphone・音声認識 / Speech Recognition・アクセシビリティ / Accessibilityが引き続き有効になっているか、
    セットアップ画面またはシステム設定で確認してください。**通常は何もしなくても
    引き継がれます。**
 2. もし、いずれかの権限が画面で「許可済み」と表示されているのに実際には録音や貼り付けが
-   動かず、かつシステム設定 →「プライバシーとセキュリティ」→ マイク／音声認識／
-   アクセシビリティのいずれの一覧にもKoedexが表示されない場合は、以前の導入が残した
+   動かず、かつシステム設定 →「プライバシーとセキュリティ」→ マイク / Microphone・音声認識 / Speech Recognition・
+   アクセシビリティ / Accessibilityのいずれの一覧にもKoedexが表示されない場合は、以前の導入が残した
    古いmacOS権限（TCC）の記録が原因の可能性があります。この症状を実際に確認できた
    場合だけ、次の3コマンドを実行することを説明し、承認を待ってください。
    - tccutil reset Microphone com.koedex.app
@@ -2514,21 +2589,33 @@ bash scripts/make_signing_cert.sh の実行前にその内容（自己署名証�
    tccutil resetを実行しないでください。
 
 【変更してはいけないもの】
-- ~/.codex/配下を変更しないでください。
+- ~/.codex/内のCodex設定や認証情報を手で編集しないでください。Codex CLIが通常動作で
+  自身の状態を保存することは構いません。
 - 上記の症状が実際に確認できた場合を除き、TCC権限をresetしないでください。resetする
   場合も、Koedexの3権限（Microphone / SpeechRecognition / Accessibility、
   com.koedex.app）以外には絶対に使わないでください。
-- 手順1以外で、既存app、古い証明書、Keychain項目、Koedexの設定や履歴を自動削除しないで
+- 既存app、古い証明書、Keychain項目、Koedexの設定や履歴を自動削除しないで
   ください。
 - 以前の導入で使ったcloneフォルダを削除・上書きしないでください。
 - リポジトリ外のスクリプトを取得・実行せず、新しいソフトウェアを勝手にインストールしないで
   ください。
 - sudo、削除、上書き、Gatekeeper無効化、quarantine属性の一括削除を独断で行わないでください。
 
+【最後の手動確認】
+私にテキストエディットを開き、fnを押し、短い文を話し、もう一度fnを押して、文字が入るか
+確認するよう案内してください。この確認は手動だけで行います。それ以外のUI自動操作が
+1〜2分で終わらない場合も手動の案内に切り替えてください。権限名は、マイク / Microphone、
+音声認識 / Speech Recognition、アクセシビリティ / Accessibilityです。macOSの版によって
+表示名が少し異なる場合があります。
+
+戻し方：切替前は旧appが/Applicationsにあります。切替後はKoedexを終了し、承認を得て新appを
+上書きのない新規フォルダへ移し、バックアップを/Applications/Koedex.appへ戻します。
+どちらのappも自動削除しないでください。
+
 【完了報告】
 1. 実際に使った作業場所、origin、tag、HEADの照合結果
 2. preflight、build（--previous-appの検証結果を含む）、install、署名検証のPASS/WARN/FAIL
-3. 退避した旧アプリ（~/Desktop/Koedex-old.app）の場所。満足したら削除してよいことと、
+3. 退避した旧アプリ（~/Developer/Koedex-backups/Koedex-<旧バージョン>.app）の場所。満足したら削除してよいことと、
    削除は私自身が判断して行うこと
 4. 権限が引き継がれたか、または古いTCC記録が見つかりtccutil resetを行ったかどうか
 5. Codex CLI接続確認と、接続できない場合の対処

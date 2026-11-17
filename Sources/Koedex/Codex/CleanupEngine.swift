@@ -606,7 +606,7 @@ actor CleanupEngine {
         let startupToken = UUID()
         // clientへcallbackを登録するawaitより先にtaskを公開する。ここで先にawaitすると、
         // actor再入時の2本目が「まだ起動していない」と見て別clientを作り得る。
-        let startupTask = Task { [weak self] in
+        let startupTask = Task { [weak self, newClient] in
             await newClient.setOnProcessExit { [weak self, weak newClient] status in
                 guard let newClient else { return }
                 Task {

@@ -113,11 +113,11 @@ Claude CodeまたはCodex CLIに貼り付けるだけで導入できます。
 #### ソースを取得する
 
 <!-- BEGIN KOEDEX_SOURCE_PIN_JA -->
-公式リポジトリから、リリース `v0.2.0` の一点だけを clone します。最新の状態（`main`）ではなく、
+公式リポジトリから、リリース `v0.2.1` の一点だけを clone します。最新の状態（`main`）ではなく、
 この版だけを取得してください。`Koedex` という名前のフォルダが既にある場所では実行しないでください。
 
 ```bash
-git clone --branch v0.2.0 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
+git clone --branch v0.2.1 --single-branch https://github.com/GrShin5/Koedex.git Koedex \
   && cd Koedex
 ```
 
@@ -127,7 +127,7 @@ clone してできたフォルダの中で、以下をそのまま貼り付け�
 ```bash
 export GIT_TERMINAL_PROMPT=0
 OFFICIAL_URL="https://github.com/GrShin5/Koedex.git"
-EXPECTED_TAG="v0.2.0"
+EXPECTED_TAG="v0.2.1"
 ok=1
 fail() { echo "❌ $1"; ok=0; }
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 \
@@ -153,11 +153,11 @@ status_out="$(git status --porcelain 2>/dev/null)"; status_rc=$?
 ❌ が1つでも出たら、そこで中止してください。別のURL、別のタグ、ZIPダウンロード、ミラーなど、
 別の取得方法へ切り替えないでください。
 
-タグはあとから移動されうるため、GitHub の Releases 画面で `v0.2.0` が immutable release として
+タグはあとから移動されうるため、GitHub の Releases 画面で `v0.2.1` が immutable release として
 公開されていることも確認してください。GitHub CLI を使える場合は、次のコマンドでも確認できます。
 
 ```bash
-gh release verify v0.2.0 --repo GrShin5/Koedex
+gh release verify v0.2.1 --repo GrShin5/Koedex
 ```
 <!-- END KOEDEX_SOURCE_PIN_JA -->
 
@@ -283,32 +283,49 @@ Koedexは、macOSの3つのプライバシー権限を必要とします。`dist
 ## 既存インストールの更新
 
 `scripts/install_app.sh`は、`/Applications/Koedex.app`が既に存在する場合、上書きせずエラーで
-停止します。そのため更新は「まず旧アプリを退避し、空いた場所へ新しいアプリを入れる」という
-手順になります。
+停止します。まず新しいappをビルド・検証し、その後に旧appをバックアップして切り替えます。
 
 AIエージェントに更新を任せる場合は、
 [docs/agent-update-prompt.md](docs/agent-update-prompt.md)のプロンプトをコピーして貼り付けてください。
 
-1. 現在インストールされているアプリを削除せず、退避します。
-   `mv /Applications/Koedex.app ~/Desktop/Koedex-old.app`
-   （`/Applications`の外であれば、退避先はどこでも構いません）
-2. **新しく作ったフォルダへ**、上の[ソースを取得する](#ソースを取得する)と同じ手順で新しいリリース
-   タグをcloneします。既存のcloneをそのまま更新して使い回さないでください。
-3. ビルドします。`./scripts/make_app.sh release`
-   退避したアプリを残してある場合は、`--previous-app ~/Desktop/Koedex-old.app`を付けると、
-   ビルドが退避アプリとの署名の連続性を検証し、
-   `更新互換性OK: bundle ID、Designated Requirement、署名者証明書は連続しています。`と表示します。
-4. インストールします。`bash scripts/install_app.sh`
-   手順1で`/Applications/Koedex.app`を空にしてあるため、ここで初めて成功します。
+1. 読み取り専用で `/Applications/Koedex.app` の存在とバージョンを確認します。
+2. `v0.2.1`を `~/Developer/Koedex-v0.2.1` へcloneします。存在したら自動で末尾に
+   `-2`、`-3`と付けます。既存フォルダは削除・上書き・再利用しません。
+   スクリプトを実行する前に、[更新プロンプト](docs/agent-update-prompt.md)のとおり
+   公式取得元、tag、HEAD、変更不能なreleaseを照合します。
+3. `--install`を付けずに `bash scripts/preflight.sh` を実行します。既存appのWARNが
+   ちょうど1件出るのは想定どおりです。SwiftUIコンポーネントの確認がFAILならビルド前に
+   止め、その案内に従います。Xcodeが既にある場合だけ、失敗したビルド・確認コマンドだけに
+   `DEVELOPER_DIR=<既存の /Applications/Xcode*.app>/Contents/Developer`を指定して再実行できます。
+   システム設定の変更や `xcode-select -s` は行いません。
+4. 旧appを `/Applications` に残したまま、
+   `./scripts/make_app.sh release --previous-app /Applications/Koedex.app` を実行します。
+   終了コード0、有効なdeep strict署名、次の行を確認します。
+   `更新互換性OK: bundle ID、Designated Requirement、署名者証明書は連続しています。`
+   `/Applications/Koedex.app`が既に存在するという⚠️行は想定どおりです。`error:`、署名失敗、
+   「安定署名として検証できません」、それ以外のスクリプト自身の⚠️行では停止します。
+   コンパイラ警告は報告しますが、それだけでは停止しません。続けて、導入済みアプリと直接比べます。
+   `bash scripts/verify_app_identity.sh /Applications/Koedex.app dist/Koedex.app` が
+   終了コード0で同じ行を出すことを確認します。
+5. ビルドが成功した後だけ、まとめて切り替えます（エージェントに任せる場合は、ここで警告と
+   切替操作をまとめて説明し、承認を1回だけ求めます）。Koedexを終了し、
+   旧appを `~/Developer/Koedex-backups/Koedex-<旧バージョン>.app` へ移します。
+   存在したら`.app`の前に `-2`、`-3`と付けます。`bash scripts/install_app.sh` を引数なしで
+   実行し、bundle ID、deep strict署名、署名の連続性を確認します。appやバックアップは
+   上書きせず、Desktopにも移しません。`install_app.sh`が失敗したら、バックアップをすぐに
+   `/Applications/Koedex.app`へ戻します。
+6. 権限を確認します。`tccutil`は後述の権限不具合の症状がある場合だけ使います。
+7. 手動でテキストエディットを開き、fnを押し、短い文を話し、再びfnを押して文字が入るか
+   確認します。それ以外のUI自動操作が1〜2分で終わらない場合も手動に切り替えます。
 
 **権限は引き継がれるため、あらためて許可し直す必要はありません。** このリポジトリからビルドする限り、
-bundle IDと署名identityは変わらず、`scripts/make_app.sh`自身がその連続性を検証します（手順3参照）。
-macOSはマイク・音声認識・アクセシビリティの許可を、個々の`.app`ファイルではなくこのidentityに
+bundle IDと署名identityは変わらず、`scripts/make_app.sh`自身がその連続性を検証します（手順4参照）。
+macOSはマイク / Microphone・音声認識 / Speech Recognition・アクセシビリティ / Accessibilityの許可を、個々の`.app`ファイルではなくこのidentityに
 紐付けているため、新しいビルドは古いアプリへ許可した内容をそのまま引き継ぎます。
 
 **ただし、すでに壊れている権限は更新しても直りません。** Koedexの画面では権限が「許可済み」に
 なっているのに録音や貼り付けが動かず、しかもシステム設定 →「プライバシーとセキュリティ」→
-マイク／音声認識／アクセシビリティのどの一覧にもKoedexが表示されない場合、それはこのMacに
+マイク / Microphone・音声認識 / Speech Recognition・アクセシビリティ / Accessibilityのどの一覧にもKoedexが表示されない場合、それはこのMacに
 以前あったインストールが残した古いmacOS権限（TCC）の記録です。アプリを更新しても、この記録は
 変わりません。実際に不具合のあったMacで、この対処により解消することを確認しています。
 対処するには、Koedexを終了してから、次の3つを**`sudo`を付けずに**実行してください。
@@ -321,6 +338,8 @@ tccutil reset Accessibility com.koedex.app
 
 そのあとKoedexを開き直し、[3つの権限付与手順](#3つの権限付与手順)のとおり、通常どおり許可し
 直してください。
+
+表示名はmacOSの版により少し異なる場合があります。
 
 ## 使い方
 
